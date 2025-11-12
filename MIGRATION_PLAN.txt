@@ -1,0 +1,280 @@
+GERTIE Qt MIGRATION - COMPREHENSIVE STRATEGIC PLAN
+Document Date: November 11, 2025
+Source: Conversation November 10, 2025 + CHANGELOG.md
+Status: Planning Phase
+Target Launch: April 2026 (DiSSCo UK Deployment)
+
+==============================================
+EXECUTIVE SUMMARY
+==============================================
+
+GERTIE is transitioning from Tkinter to Qt (PyQt6/PySide6) to achieve professional-grade
+performance suitable for deployment to UK natural history institutions via DiSSCo UK.
+After 118 optimization commits, Tkinter's single-threaded architecture has reached its
+performance ceiling and cannot deliver real-time responsiveness for 8-camera video display.
+
+Key Metrics:
+- Timeline: ~4 months (December 2025 - March 2026)
+- Development Effort: 76 days @ 2-4 hours/day = 190-300 hours
+- Expected Performance: 90-95% lag reduction
+- Target Response Time: <100ms GUI operations
+- Automation Level: 70-80% (via Claude + Desktop Commander)
+- Launch Date: April 2026
+
+==============================================
+PROBLEM STATEMENT
+==============================================
+
+Current State (Tkinter v1.0.0)
+
+Strengths:
+✓ Feature complete
+✓ Functional 8-camera system
+✓ User testing validated concept
+✓ Proof of concept successful
+
+Critical Limitations:
+✗ Chunky, laggy, unresponsive GUI (200-500ms lag)
+✗ Single-threaded event loop bottleneck
+✗ Poor performance during multi-camera operations
+✗ Network operations block UI updates
+✗ Cannot meet DiSSCo UK professional standards
+
+Root Cause Analysis:
+After 118 commits optimizing Tkinter, fundamental architectural limitations prevent
+real-time performance. The single-threaded nature of Tkinter cannot handle:
+- Simultaneous 8-camera frame updates
+- Network I/O without blocking GUI
+- Smooth user interactions during processing
+- Professional-grade responsiveness
+
+Conclusion: Qt migration is REQUIRED, not optional.
+
+==============================================
+SOLUTION DESIGN - Qt Framework
+==============================================
+
+Why Qt?
+1. Multi-threaded architecture (separate UI and worker threads)
+2. Hardware-accelerated rendering
+3. Professional widget toolkit
+4. Industry-standard for camera applications
+5. Proven performance with video streams
+6. Active development and support
+
+Framework Choice: PyQt6 vs PySide6
+Evaluation Criteria:
+- License compatibility (both LGPL/GPL friendly)
+- API stability and documentation
+- Performance benchmarks
+- Community support
+- DiSSCo UK deployment requirements
+
+Decision: TBD after Phase 1 evaluation
+Approach: Build prototype in both, measure performance, choose winner
+
+==============================================
+MIGRATION STRATEGY - MACBOOK FIRST APPROACH
+==============================================
+
+Key Principle: Build and test on MacBook BEFORE Pi deployment
+This minimizes hardware deployment cycles and speeds development.
+
+Phase 0: Environment Setup (Week 1)
+- [✓] Create project structure
+- [✓] Copy Tkinter reference code
+- [✓] Initialize git repository
+- [ ] Install PyQt6 and PySide6 on MacBook
+- [ ] Create mock camera data generator
+- [ ] Build basic Qt window (proof of concept)
+- [ ] Test both PyQt6 and PySide6 performance
+
+MacBook Testing Strategy:
+- Use mock camera data (pre-recorded frames or generated test patterns)
+- Simulate network delays with async timers
+- Test UI responsiveness without real hardware
+- Validate threading model with mock workers
+
+Deployment to Pi: ONLY when MacBook tests pass
+
+Phase 1: Core GUI Framework (Weeks 2-3)
+- [ ] Choose Qt framework (PyQt6 vs PySide6) based on testing
+- [ ] Build main window layout
+- [ ] Implement 8-camera grid view (with mock data)
+- [ ] Create mock camera feed generator
+- [ ] Test grid resizing and layout management
+- [ ] Measure GUI response time (<100ms target)
+- [ ] LOCAL TESTING: All features verified on MacBook
+- [ ] Pi Deployment: Basic framework validation only
+
+Deliverable: Working Qt window with responsive mock camera grid
+
+Phase 2: Camera Integration (Weeks 4-6)
+- [ ] Design worker thread architecture
+- [ ] Implement camera communication protocol
+- [ ] Build frame buffer management
+- [ ] Create camera health monitoring
+- [ ] Add network status indicators
+- [ ] LOCAL TESTING: Mock network delays, simulate camera failures
+- [ ] Pi Deployment: First real camera integration test
+
+Deliverable: Qt GUI displaying live camera feeds with threading
+
+Phase 3: Feature Migration (Weeks 7-10)
+- [ ] Still capture with timestamp overlay
+- [ ] Video stream recording
+- [ ] Camera settings interface
+- [ ] Error handling and recovery
+- [ ] Status bar and indicators
+- [ ] User preferences and configuration
+- [ ] LOCAL TESTING: All features with mocks
+- [ ] Pi Deployment: Feature validation with real cameras
+
+Deliverable: Feature-complete Qt application
+
+Phase 4: Performance Optimization (Weeks 11-13)
+- [ ] Profile GPU vs CPU rendering
+- [ ] Optimize frame buffer management
+- [ ] Minimize memory allocations
+- [ ] Fine-tune thread synchronization
+- [ ] Benchmark against <100ms target
+- [ ] LOCAL TESTING: Stress testing with mock data
+- [ ] Pi Deployment: Real-world performance validation
+
+Deliverable: Optimized system meeting performance targets
+
+Phase 5: Testing & Validation (Weeks 14-16)
+- [ ] Unit tests for all components
+- [ ] Integration tests with mock and real cameras
+- [ ] User acceptance testing
+- [ ] Documentation and deployment guides
+- [ ] Final Pi deployment and validation
+- [ ] Prepare for DiSSCo UK deployment
+
+Deliverable: Production-ready Qt application
+
+==============================================
+MACBOOK TESTING TOOLKIT
+==============================================
+
+Mock Camera Data Generator:
+- Pre-recorded image sequences
+- Synthetic test patterns (color bars, grids)
+- Configurable frame rates
+- Simulated network latency
+- Error injection for robustness testing
+
+Testing Scenarios:
+1. All 8 cameras active simultaneously
+2. Network interruptions and recovery
+3. Camera failures and reconnection
+4. High-frequency frame updates
+5. UI interaction during processing
+6. Memory leak detection (long-running tests)
+
+Benefits of MacBook-First Approach:
+✓ Faster iteration cycles (no USB transfer)
+✓ Better debugging tools (macOS native)
+✓ Easier profiling and performance measurement
+✓ Reduced Pi deployment cycles
+✓ Parallel development (multiple features simultaneously)
+
+==============================================
+DEPLOYMENT PROTOCOL
+==============================================
+
+When to Deploy to Pi:
+1. After Phase 1: Framework validation (basic GUI)
+2. After Phase 2: Camera integration test (real feeds)
+3. After Phase 3: Feature validation (complete system)
+4. After Phase 4: Performance validation (final tuning)
+5. Phase 5: User acceptance testing
+
+Deployment Method: sync_to_slaves.sh (maintain existing protocol)
+- Copy camera_system_qt_conversion to USB
+- Deploy to control1 Pi
+- Run sync_to_slaves.sh to propagate to all cameras
+- Test with real hardware
+- Collect logs back to MacBook
+- Continue development on MacBook
+
+==============================================
+SUCCESS METRICS
+==============================================
+
+Technical Metrics:
+- GUI response time: <100ms (vs 200-500ms Tkinter)
+- Frame rate: 30 FPS for 8 cameras (vs 10-15 FPS Tkinter)
+- Memory usage: <500MB (vs 800MB+ Tkinter)
+- CPU usage: <70% on Pi (vs 95%+ Tkinter)
+
+User Experience Metrics:
+- Smooth camera switching
+- No lag during captures
+- Responsive during network operations
+- Professional appearance
+- Intuitive interface
+
+Development Metrics:
+- 70-80% automation via Claude + Desktop Commander
+- 4-month timeline adherence
+- Minimal Pi deployment cycles (<10 total)
+- Continuous session logging for recovery
+
+==============================================
+RISK MITIGATION
+==============================================
+
+Risk: Qt framework choice (PyQt6 vs PySide6)
+Mitigation: Build proof-of-concept in both, benchmark, choose best
+
+Risk: Threading complexity
+Mitigation: Extensive local testing with mock data before Pi deployment
+
+Risk: Performance on Pi hardware
+Mitigation: Profile on MacBook first, optimize before deployment
+
+Risk: Session interruptions (timeouts)
+Mitigation: Detailed logging protocol (QT_CONVERSION_LOG.txt)
+
+Risk: Breaking existing camera communication
+Mitigation: Maintain reference Tkinter code, gradual migration
+
+==============================================
+FINAL DELIVERABLES
+==============================================
+
+Code Deliverables:
+- Production Qt application
+- Mock camera testing toolkit
+- Unit and integration tests
+- Deployment scripts
+- Documentation
+
+Documentation Deliverables:
+- Architecture design document
+- User manual
+- Deployment guide
+- Performance benchmarks
+- Migration lessons learned
+
+Validation Deliverables:
+- Test results (MacBook and Pi)
+- Performance metrics report
+- User acceptance sign-off
+- DiSSCo UK readiness certification
+
+==============================================
+TIMELINE SUMMARY
+==============================================
+
+Month 1 (Dec 2025): Environment + Core Framework
+Month 2 (Jan 2026): Camera Integration + Feature Start
+Month 3 (Feb 2026): Feature Completion + Optimization
+Month 4 (Mar 2026): Testing + Validation + Documentation
+
+Launch: April 2026 - DiSSCo UK Deployment
+
+==============================================
+END OF MIGRATION PLAN
+==============================================
