@@ -1,0 +1,406 @@
+==============================================
+QT CONVERSION PROTOCOL v1.0
+Operational Workflow for Camera System Migration
+==============================================
+
+Version: 1.0
+Date: 2025-11-12
+Based on: GERTIE Protocol + MacBook-First Testing Strategy
+Purpose: Systematic Qt conversion with session continuity
+
+==============================================
+IMMUTABLE SYSTEM CONFIGURATION
+==============================================
+
+**Working Directory**: /Users/andrew1/Desktop/camera_system_qt_conversion
+**Session Log**: /Users/andrew1/Desktop/QT_CONVERSION_LOG.txt
+**Reference Code**: /Users/andrew1/Desktop/camera_system_qt_conversion/reference_tkinter/
+**Testing Strategy**: MacBook-first with mock data, minimal Pi deployments
+**Deployment Chain**: MacBook → USB → control1 → sync_to_slaves.sh → 8 cameras
+
+**Reference Directories (READ-ONLY)**:
+- reference_tkinter/ - Original Tkinter baseline (DO NOT MODIFY)
+- /Users/andrew1/Desktop/GOLDEN_REFERENCE_DO_NOT_TOUCH - Working Tkinter system
+
+==============================================
+CRITICAL RULES (ALWAYS FOLLOW)
+==============================================
+
+1. ALL file operations MUST use Desktop Commander (DC:)
+2. Session log MUST be updated after EVERY action
+3. Git commit after EVERY logical change
+4. Test on MacBook BEFORE deploying to Pi
+5. NEVER modify reference_tkinter/ directory
+6. Deploy ONLY via sync_to_slaves.sh (when needed)
+7. All work proceeds through defined phases
+8. Recovery protocol after any timeout
+
+==============================================
+PHASE 0: MANDATORY INITIALIZATION
+==============================================
+
+Execute this FIRST in every session:
+
+### 0.1 Read Session Log
+DC: read_file path="/Users/andrew1/Desktop/QT_CONVERSION_LOG.txt" offset=-100 length=100
+
+### 0.2 Check Project State
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && git status -s && git log -1 --oneline" timeout_ms=3000
+
+### 0.3 Determine Current Phase
+Based on log and git status:
+- Setup incomplete → Continue Phase 1 (Environment)
+- Mock data needed → Phase 2 (Mock Camera)
+- Framework ready → Phase 3 (Qt Framework)
+- Features ready → Phase 4 (Feature Migration)
+- Optimization → Phase 5 (Performance)
+- Testing → Phase 6 (Validation)
+
+### 0.4 Log Session Start
+DC: write_file path="/Users/andrew1/Desktop/QT_CONVERSION_LOG.txt" mode="append" content="
+---
+## SESSION: $(date '+%Y-%m-%d %H:%M:%S')
+**Objective**: [USER REQUEST]
+**Starting State**: [DESCRIBE]
+**Current Phase**: [DETERMINED PHASE]
+**Next Actions**: [PLANNED STEPS]
+"
+
+==============================================
+PHASE 1: ENVIRONMENT SETUP
+==============================================
+
+Goal: Install Qt frameworks and verify MacBook environment
+
+### 1.1 Check Python Version
+DC: start_process command="python3 --version && which python3" timeout_ms=2000
+
+### 1.2 Install PyQt6
+DC: start_process command="pip3 install PyQt6 --user --break-system-packages 2>&1 | tail -20" timeout_ms=30000
+
+### 1.3 Install PySide6
+DC: start_process command="pip3 install PySide6 --user --break-system-packages 2>&1 | tail -20" timeout_ms=30000
+
+### 1.4 Verify Installation
+DC: start_process command="python3 -c 'import PyQt6; import PySide6; print(\"PyQt6:\", PyQt6.__version__); print(\"PySide6:\", PySide6.__version__)'" timeout_ms=3000
+
+### 1.5 Install Testing Tools
+DC: start_process command="pip3 install pytest memory-profiler opencv-python --user --break-system-packages" timeout_ms=30000
+
+### 1.6 Log Environment Setup
+DC: write_file path="/Users/andrew1/Desktop/QT_CONVERSION_LOG.txt" mode="append" content="
+### Phase 1 Complete: [$(date '+%H:%M:%S')]
+**Environment**: MacBook configured for Qt development
+**Installed**: PyQt6, PySide6, pytest, opencv-python
+**Status**: Ready for Phase 2 (Mock Camera Generator)
+"
+
+==============================================
+PHASE 2: MOCK CAMERA GENERATOR
+==============================================
+
+Goal: Create mock camera data system for MacBook testing
+
+### 2.1 Create Mock Camera Module
+DC: write_file path="/Users/andrew1/Desktop/camera_system_qt_conversion/src/mock_camera.py" mode="rewrite" content="[MOCK CAMERA CODE]"
+
+### 2.2 Create Test Patterns
+DC: write_file path="/Users/andrew1/Desktop/camera_system_qt_conversion/tests/generate_test_patterns.py" mode="rewrite" content="[TEST PATTERN GENERATOR]"
+
+### 2.3 Generate Test Data
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && python3 tests/generate_test_patterns.py" timeout_ms=10000
+
+### 2.4 Verify Mock Data
+DC: start_process command="ls -lh ~/Desktop/camera_system_qt_conversion/tests/mock_data/patterns/" timeout_ms=2000
+
+### 2.5 Commit Mock System
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && git add src/mock_camera.py tests/ && git commit -m 'Add mock camera system for MacBook testing'" timeout_ms=5000
+
+### 2.6 Log Mock System
+DC: write_file path="/Users/andrew1/Desktop/QT_CONVERSION_LOG.txt" mode="append" content="
+### Phase 2 Complete: [$(date '+%H:%M:%S')]
+**Mock System**: 8-camera mock data generator ready
+**Test Patterns**: Generated and verified
+**Status**: Ready for Phase 3 (Qt Framework)
+"
+
+==============================================
+PHASE 3: QT FRAMEWORK IMPLEMENTATION
+==============================================
+
+Goal: Build basic Qt GUI framework with mock camera display
+
+### 3.1 Create Main Window
+DC: write_file path="/Users/andrew1/Desktop/camera_system_qt_conversion/src/main_window.py" mode="rewrite" content="[QT MAIN WINDOW CODE]"
+
+### 3.2 Create Camera Grid Widget
+DC: write_file path="/Users/andrew1/Desktop/camera_system_qt_conversion/src/camera_grid.py" mode="rewrite" content="[CAMERA GRID CODE]"
+
+### 3.3 Test Basic Window
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && python3 -c 'from src.main_window import MainWindow; import sys; from PyQt6.QtWidgets import QApplication; app = QApplication(sys.argv); win = MainWindow(); print(\"Window created successfully\")'" timeout_ms=5000
+
+### 3.4 Benchmark PyQt6 vs PySide6
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && python3 tests/benchmark_frameworks.py" timeout_ms=30000
+
+### 3.5 Choose Framework
+Based on benchmark results, decide PyQt6 or PySide6
+Document decision in session log
+
+### 3.6 Commit Framework
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && git add src/*.py && git commit -m 'Add Qt framework: main window + camera grid'" timeout_ms=5000
+
+### 3.7 Log Framework Ready
+DC: write_file path="/Users/andrew1/Desktop/QT_CONVERSION_LOG.txt" mode="append" content="
+### Phase 3 Complete: [$(date '+%H:%M:%S')]
+**Framework**: [PyQt6/PySide6] chosen based on benchmarks
+**Components**: MainWindow, CameraGrid implemented
+**Status**: Ready for Phase 4 (Feature Migration)
+"
+
+==============================================
+PHASE 4: FEATURE MIGRATION
+==============================================
+
+Goal: Migrate Tkinter features to Qt incrementally
+
+### 4.1 Review Tkinter Feature
+DC: read_file path="/Users/andrew1/Desktop/camera_system_qt_conversion/reference_tkinter/[FILE]" offset=[LINE] length=50
+
+### 4.2 Design Qt Equivalent
+Document approach in session log before coding
+
+### 4.3 Implement Qt Feature
+DC: write_file path="/Users/andrew1/Desktop/camera_system_qt_conversion/src/[FEATURE].py" mode="rewrite" content="[QT FEATURE CODE]"
+
+### 4.4 Test with Mock Data
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && python3 tests/test_[feature].py" timeout_ms=10000
+
+### 4.5 Measure Performance
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && python3 -m cProfile -s cumtime tests/test_[feature].py 2>&1 | head -30" timeout_ms=15000
+
+### 4.6 Commit Feature
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && git add src/[FEATURE].py tests/test_[feature].py && git commit -m 'Add [feature]: [description]'" timeout_ms=5000
+
+### 4.7 Log Feature Complete
+DC: write_file path="/Users/andrew1/Desktop/QT_CONVERSION_LOG.txt" mode="append" content="
+- [$(date '+%H:%M:%S')] Feature: [NAME]
+  - Migrated from: reference_tkinter/[FILE]
+  - Performance: [MEASUREMENT]
+  - Status: Working with mock data
+"
+
+Repeat 4.1-4.7 for each feature until all migrated.
+
+==============================================
+PHASE 5: PERFORMANCE OPTIMIZATION
+==============================================
+
+Goal: Achieve <100ms GUI response time target
+
+### 5.1 Profile Current Performance
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && python3 -m cProfile -o profile.stats tests/full_system_test.py && python3 -c 'import pstats; p = pstats.Stats(\"profile.stats\"); p.sort_stats(\"cumulative\"); p.print_stats(30)'" timeout_ms=60000
+
+### 5.2 Identify Bottlenecks
+Analyze profile output, document findings in session log
+
+### 5.3 Optimize Critical Path
+DC: edit_block file_path="/Users/andrew1/Desktop/camera_system_qt_conversion/src/[FILE]" old_string="[SLOW CODE]" new_string="[OPTIMIZED CODE]"
+
+### 5.4 Verify Improvement
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && python3 tests/benchmark_performance.py" timeout_ms=30000
+
+### 5.5 Memory Leak Check
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && python3 -m memory_profiler tests/long_run_test.py" timeout_ms=120000
+
+### 5.6 Commit Optimization
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && git add . && git commit -m 'Optimize: [description] - [improvement]'" timeout_ms=5000
+
+### 5.7 Log Optimization
+DC: write_file path="/Users/andrew1/Desktop/QT_CONVERSION_LOG.txt" mode="append" content="
+### Optimization: [$(date '+%H:%M:%S')]
+**Target**: [WHAT WAS OPTIMIZED]
+**Before**: [OLD METRIC]
+**After**: [NEW METRIC]
+**Improvement**: [PERCENTAGE]
+"
+
+==============================================
+PHASE 6: PI DEPLOYMENT PREPARATION
+==============================================
+
+Goal: Prepare for hardware deployment after MacBook validation
+
+### 6.1 Pre-Deployment Checklist
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && python3 tests/pre_deployment_check.py" timeout_ms=30000
+
+### 6.2 Final MacBook Validation
+- All features working with mocks
+- Performance <100ms target met
+- No memory leaks
+- All tests passing
+- Code reviewed
+
+### 6.3 Create Deployment Package
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && git status && git log -5 --oneline" timeout_ms=3000
+
+### 6.4 Create Deployment Instructions
+DC: write_file path="/Users/andrew1/Desktop/camera_system_qt_conversion/DEPLOY_TO_PI.txt" mode="rewrite" content="# DEPLOYMENT TO PI - Qt System
+
+Date: $(date)
+Commit: [GIT HASH]
+Phase: [DEPLOYMENT PHASE NUMBER]
+
+## MANDATORY STEPS:
+1. Copy camera_system_qt_conversion to USB
+2. On control1: cp -r /media/USB/camera_system_qt_conversion /home/andrc1/
+3. cd /home/andrc1/camera_system_qt_conversion
+4. Install dependencies: pip3 install PyQt6 --break-system-packages
+5. Deploy via sync_to_slaves.sh
+6. Test: python3 src/main.py
+7. Collect logs: cp /home/andrc1/Desktop/updatelog.txt /media/USB/
+8. Return logs to MacBook for analysis
+
+## EXPECTED RESULT:
+[WHAT SHOULD WORK]
+
+## TEST CHECKLIST:
+- [ ] All 8 cameras display live feeds
+- [ ] GUI response time <100ms
+- [ ] No crashes or errors
+- [ ] Camera switching smooth
+- [ ] Still capture working
+- [ ] Video recording working
+
+## DO NOT:
+- Skip MacBook validation
+- Deploy without all tests passing
+- Use alternative deployment methods
+"
+
+### 6.5 Log Deployment Ready
+DC: write_file path="/Users/andrew1/Desktop/QT_CONVERSION_LOG.txt" mode="append" content="
+### READY FOR PI DEPLOYMENT: [$(date '+%H:%M:%S')]
+**Phase**: [DEPLOYMENT PHASE #]
+**MacBook Tests**: ALL PASSED
+**Performance**: [METRICS]
+**Package**: camera_system_qt_conversion
+**SESSION PAUSED** - Awaiting Pi hardware deployment
+"
+
+==============================================
+PHASE 7: POST-DEPLOYMENT ANALYSIS
+==============================================
+
+Goal: Analyze Pi hardware logs and validate performance
+
+### 7.1 Read Pi Logs
+DC: read_file path="/Users/andrew1/Desktop/updatelog.txt" offset=-200 length=200
+
+### 7.2 Search for Errors
+DC: start_search path="/Users/andrew1/Desktop/updatelog.txt" pattern="ERROR|FAIL|Exception" searchType="content" maxResults=50 timeout_ms=5000
+
+### 7.3 Categorize Results
+- Success: All features working on Pi
+- Partial: Some issues found
+- Failure: Major problems
+
+### 7.4 Log Analysis
+DC: write_file path="/Users/andrew1/Desktop/QT_CONVERSION_LOG.txt" mode="append" content="
+### Pi Deployment Results: [$(date '+%H:%M:%S')]
+**Phase**: [DEPLOYMENT PHASE #]
+**Status**: [SUCCESS/PARTIAL/FAILURE]
+**Errors Found**: [COUNT]
+**Issues**: [LIST]
+**Next Action**: [PLAN]
+"
+
+### 7.5 Address Issues (if any)
+If issues found, return to appropriate phase to fix.
+Always fix on MacBook first, test with mocks, then re-deploy.
+
+==============================================
+PHASE 8: SUCCESS DOCUMENTATION
+==============================================
+
+Goal: Document successful conversion and tag version
+
+### 8.1 Tag Version
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && git tag 'qt-v1.0-tested-$(date +%Y%m%d)' && git tag -l" timeout_ms=3000
+
+### 8.2 Create Final Report
+DC: write_file path="/Users/andrew1/Desktop/camera_system_qt_conversion/docs/CONVERSION_COMPLETE.txt" mode="rewrite" content="[FINAL REPORT]"
+
+### 8.3 Log Success
+DC: write_file path="/Users/andrew1/Desktop/QT_CONVERSION_LOG.txt" mode="append" content="
+## ✓ QT CONVERSION SUCCESSFUL: [$(date '+%Y-%m-%d %H:%M:%S')]
+**Duration**: [WEEKS/MONTHS]
+**Pi Deployments**: [COUNT] (target was <10)
+**Performance**: <100ms GUI response ACHIEVED
+**Features**: All Tkinter features migrated
+**Framework**: [PyQt6/PySide6] final choice
+**Tagged**: qt-v1.0-tested-[DATE]
+**Status**: READY FOR DiSSCo UK DEPLOYMENT (April 2026)
+---
+"
+
+==============================================
+ENFORCEMENT RULES
+==============================================
+
+### ALWAYS:
+- Use Desktop Commander for ALL file operations
+- Update session log after EVERY action
+- Commit changes after each logical unit
+- Test on MacBook BEFORE deploying to Pi
+- Use mock data for MacBook testing
+- Follow phase progression
+- Document decisions in session log
+
+### NEVER:
+- Skip session logging
+- Modify reference_tkinter directory
+- Deploy without MacBook validation
+- Skip Phase 0 initialization
+- Use tools other than Desktop Commander
+- Deploy uncommitted changes
+
+### ERROR RECOVERY:
+- Read last 100 lines of session log
+- Check git status and last commit
+- Identify last completed action
+- Resume from next logical step
+- Update session log with recovery notes
+
+==============================================
+QUICK REFERENCE COMMANDS
+==============================================
+
+Session Start:
+DC: read_file path="/Users/andrew1/Desktop/QT_CONVERSION_LOG.txt" offset=-100
+
+Check Status:
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && git status -s" timeout_ms=2000
+
+Run Tests:
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && python3 -m pytest tests/" timeout_ms=30000
+
+Profile Performance:
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && python3 -m cProfile tests/benchmark.py" timeout_ms=30000
+
+Commit Changes:
+DC: start_process command="cd ~/Desktop/camera_system_qt_conversion && git add . && git commit -m '[MESSAGE]'" timeout_ms=5000
+
+Update Log:
+DC: write_file path="/Users/andrew1/Desktop/QT_CONVERSION_LOG.txt" mode="append" content="[ENTRY]"
+
+==============================================
+END OF QT CONVERSION PROTOCOL
+==============================================
+
+This protocol ensures:
+1. MacBook-first testing for rapid iteration
+2. Systematic phase progression
+3. Session continuity through detailed logging
+4. Minimal Pi deployments (<10 total)
+5. Performance targets achieved (<100ms)
+6. Professional-grade Qt migration
