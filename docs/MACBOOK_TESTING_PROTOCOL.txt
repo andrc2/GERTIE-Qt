@@ -1,0 +1,343 @@
+==============================================
+MACBOOK-FIRST TESTING PROTOCOL
+Qt Conversion Development Workflow
+==============================================
+
+Version: 1.0
+Date: 2025-11-12
+Purpose: Enable rapid Qt development without frequent Pi deployments
+
+==============================================
+CORE PRINCIPLE
+==============================================
+
+Build → Test → Validate on MacBook BEFORE deploying to Pi hardware.
+
+This approach:
+✓ Speeds iteration cycles (no USB transfer delays)
+✓ Enables better debugging (native macOS tools)
+✓ Reduces Pi deployment cycles (<10 total)
+✓ Allows parallel feature development
+✓ Maintains session continuity through logging
+
+==============================================
+TESTING ARCHITECTURE
+==============================================
+
+Three-Tier Testing Approach:
+
+TIER 1: Unit Tests (Individual Components)
+- Qt widgets in isolation
+- Mock camera feed generators
+- Frame buffer management
+- Thread synchronization
+- Network protocol handlers
+
+TIER 2: Integration Tests (MacBook)
+- Full GUI with 8 mock cameras
+- Simulated network delays
+- Error injection and recovery
+- Performance benchmarking
+- Memory leak detection
+
+TIER 3: Hardware Validation (Pi)
+- Real camera integration
+- Production network conditions
+- Performance on target hardware
+- User acceptance testing
+- Final deployment validation
+
+Deploy to Pi ONLY when Tier 1 & 2 pass completely.
+
+==============================================
+MOCK CAMERA DATA STRATEGY
+==============================================
+
+Mock Data Sources:
+
+1. Pre-Recorded Sequences
+   - Capture real camera frames from existing system
+   - Store as image sequences (JPEG/PNG)
+   - Replay at configurable frame rates
+   - Simulates realistic camera behavior
+
+2. Synthetic Test Patterns
+   - Color bars (SMPTE standard)
+   - Geometric patterns (grids, checkerboards)
+   - Moving patterns (scrolling, rotating)
+   - Stress test patterns (high frequency)
+
+3. Error Simulation
+   - Dropped frames
+   - Network timeouts
+   - Corrupted data
+   - Camera disconnection/reconnection
+
+Mock Camera Generator Implementation:
+File: src/mock_camera.py
+- 8 independent mock camera instances
+- Configurable frame rate (1-30 FPS)
+- Network delay simulation (0-500ms)
+- Error injection controls
+- Frame timestamp generation
+- Camera ID assignment (rep1-rep8)
+
+==============================================
+DEVELOPMENT WORKFLOW
+==============================================
+
+Standard Development Cycle:
+
+1. DESIGN (MacBook)
+   - Review Tkinter reference code
+   - Design Qt equivalent architecture
+   - Plan threading model
+   - Document approach in session log
+
+2. IMPLEMENT (MacBook)
+   - Write Qt code in src/
+   - Use Desktop Commander for file operations
+   - Follow GERTIE logging protocol
+   - Commit after each logical unit
+
+3. TEST (MacBook - Tier 1)
+   - Run unit tests with pytest
+   - Test individual components
+   - Verify no regressions
+   - Measure performance
+
+4. INTEGRATE (MacBook - Tier 2)
+   - Run with mock camera data
+   - Test full GUI interaction
+   - Benchmark response times
+   - Stress test with 8 cameras
+
+5. VALIDATE (MacBook - Final Check)
+   - All features working with mocks
+   - Performance meets <100ms target
+   - No memory leaks (24hr test)
+   - Code review and cleanup
+
+6. DEPLOY (Pi - Only When Above Pass)
+   - Copy to USB
+   - Deploy via sync_to_slaves.sh
+   - Run with real cameras
+   - Collect logs back to MacBook
+
+7. ANALYZE (MacBook)
+   - Review Pi logs
+   - Address any hardware-specific issues
+   - Update code if needed
+   - Return to step 1 if issues found
+
+==============================================
+PERFORMANCE TESTING FRAMEWORK
+==============================================
+
+Metrics to Measure on MacBook:
+
+GUI Responsiveness:
+- Button click to action: <50ms
+- Camera switch latency: <100ms
+- Frame update rate: 30 FPS target
+- UI thread blocking: 0ms (all work in background)
+
+Resource Usage:
+- Memory: <300MB on MacBook (estimate <500MB on Pi)
+- CPU: <50% on MacBook (estimate <70% on Pi)
+- Frame drops: <1% over 10-minute test
+
+Testing Tools:
+- Python cProfile for performance profiling
+- memory_profiler for leak detection
+- pytest for automated testing
+- Custom timing decorators
+
+Benchmarking Procedure:
+1. Start mock camera system (8 cameras @ 30 FPS)
+2. Run for 10 minutes with UI interaction every 30 seconds
+3. Measure: frame rate, response time, memory growth
+4. Compare against targets: <100ms, 30 FPS, stable memory
+5. If targets met → proceed to Pi deployment
+6. If targets missed → profile, optimize, retest
+
+==============================================
+MOCK DATA DIRECTORY STRUCTURE
+==============================================
+
+tests/mock_data/
+├── sequences/           # Pre-recorded camera sequences
+│   ├── rep1/           # Camera 1 sequence
+│   │   ├── frame_0001.jpg
+│   │   ├── frame_0002.jpg
+│   │   └── ...
+│   ├── rep2/           # Camera 2 sequence
+│   └── ...rep8/        # Camera 8 sequence
+│
+├── patterns/           # Synthetic test patterns
+│   ├── color_bars.jpg
+│   ├── checkerboard.jpg
+│   ├── grid.jpg
+│   └── motion_test.jpg
+│
+└── config/             # Mock camera configurations
+    ├── normal.json     # Standard operation
+    ├── stress.json     # High load test
+    └── errors.json     # Error injection scenarios
+
+==============================================
+DEBUGGING ADVANTAGES ON MACBOOK
+==============================================
+
+Native macOS Debugging Tools:
+- Visual Studio Code with Python debugger
+- Qt Creator for UI debugging
+- Xcode Instruments for profiling
+- Console.app for log analysis
+
+Benefits Over Pi Debugging:
+✓ Faster debug cycles (no deployment delay)
+✓ Better IDE integration
+✓ More powerful hardware for profiling
+✓ Screen sharing for collaboration
+✓ Easier memory/CPU analysis
+
+When to Use Pi for Debugging:
+- Hardware-specific issues
+- Network timing problems
+- Performance on target hardware
+- Final validation before deployment
+
+==============================================
+SESSION CONTINUITY PROTOCOL
+==============================================
+
+Logging Requirements (Like GERTIE):
+
+After EVERY action, update: /Users/andrew1/Desktop/QT_CONVERSION_LOG.txt
+
+Log Entry Format:
+- [HH:MM:SS] Action: Description
+  - Result: Success/Failure
+  - Files Modified: List
+  - Commit: Git hash
+  - Next Step: What's next
+
+Recovery After Timeout:
+1. Read last 100 lines of QT_CONVERSION_LOG.txt
+2. Check git status
+3. Resume from last logged action
+4. Continue with next planned step
+
+Session State Checkpoints:
+- After each file creation/edit
+- After each git commit
+- After each test run
+- After each deployment
+
+==============================================
+DEPLOYMENT DECISION CRITERIA
+==============================================
+
+When to Deploy to Pi:
+
+✓ Ready to Deploy IF:
+- All MacBook unit tests pass
+- Integration tests with mocks pass
+- Performance targets met on MacBook
+- No memory leaks detected
+- Code reviewed and cleaned
+- Git committed with clear message
+- Session log updated
+
+✗ NOT Ready to Deploy IF:
+- Any MacBook test failures
+- Performance below targets
+- Uncommitted changes
+- Incomplete features
+- Known bugs or issues
+
+Deployment Phases (Maximum 10 total):
+1. Phase 1: Basic Qt framework validation
+2. Phase 2: Camera integration test
+3. Phase 3: Feature validation
+4. Phase 4: Performance validation
+5. Phase 5: User acceptance testing
+6-10. Bug fix deployments (as needed)
+
+==============================================
+TOOLS AND DEPENDENCIES
+==============================================
+
+Required on MacBook:
+- Python 3.9+
+- PyQt6 and PySide6 (for evaluation)
+- pytest (testing framework)
+- memory_profiler (leak detection)
+- OpenCV (image processing)
+- Git (version control)
+- Desktop Commander (file operations)
+
+Required on Pi:
+- Same as MacBook
+- Real camera drivers
+- Network configuration
+- sync_to_slaves.sh (deployment)
+
+==============================================
+SUCCESS CRITERIA
+==============================================
+
+MacBook Testing Success = Ready for Pi Deployment:
+
+Performance:
+✓ GUI response <100ms
+✓ 30 FPS with 8 mock cameras
+✓ No UI blocking
+✓ Stable memory usage
+
+Functionality:
+✓ All features working with mocks
+✓ Error handling tested
+✓ Recovery mechanisms validated
+✓ Settings persistence working
+
+Quality:
+✓ All unit tests passing
+✓ No memory leaks
+✓ Code reviewed
+✓ Documentation complete
+
+==============================================
+COMPARISON: MACBOOK-FIRST vs DEPLOY-FIRST
+==============================================
+
+Old Approach (Deploy-First):
+1. Write code on MacBook
+2. Copy to USB
+3. Deploy to Pi
+4. Test on hardware
+5. Find issues
+6. Copy back to MacBook
+7. Fix issues
+8. Repeat (10-20 cycles)
+Time per cycle: ~30 minutes
+
+New Approach (MacBook-First):
+1. Write code on MacBook
+2. Test with mocks on MacBook
+3. Fix issues on MacBook
+4. Repeat until perfect (fast cycles)
+5. Deploy to Pi once
+6. Validate on hardware
+7. Fix hardware-specific issues only
+Time per Mac cycle: ~2 minutes
+Time per Pi cycle: ~30 minutes
+Total Pi cycles: <10 (vs 10-20)
+
+Time Saved: ~5-10 hours over project lifetime
+Iteration Speed: 15x faster during development
+
+==============================================
+END OF MACBOOK TESTING PROTOCOL
+==============================================
