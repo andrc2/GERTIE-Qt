@@ -225,6 +225,7 @@ class CameraSettingsDialog(QDialog):
             QPushButton:hover { background-color: #3b6; }
             QPushButton:pressed { background-color: #194; }
         """)
+        self.apply_btn.clicked.connect(self.apply_settings)
         button_layout.addWidget(self.apply_btn)
         
         button_layout.addStretch()
@@ -303,6 +304,46 @@ class CameraSettingsDialog(QDialog):
             "crop_width": 100,
             "crop_height": 100,
         }
+    
+    def apply_settings(self):
+        """Apply settings - save and emit signal"""
+        print(f"🔧 Applying settings to {self.camera_name} ({self.ip})...")
+        
+        # Build settings dict
+        rotation_degrees = [0, 90, 180, 270][self.rotation_combo.currentIndex()]
+        
+        settings_dict = {
+            "iso": self.iso_slider.value(),
+            "brightness": self.brightness_slider.value(),
+            "flip_horizontal": self.flip_h_checkbox.isChecked(),
+            "flip_vertical": self.flip_v_checkbox.isChecked(),
+            "grayscale": self.grayscale_checkbox.isChecked(),
+            "rotation": rotation_degrees,
+            "crop_enabled": self.crop_enabled_checkbox.isChecked(),
+            "crop_x": self.crop_x_spin.value(),
+            "crop_y": self.crop_y_spin.value(),
+            "crop_width": self.crop_w_spin.value(),
+            "crop_height": self.crop_h_spin.value(),
+        }
+        
+        # Save to file
+        self.save_camera_settings(settings_dict)
+        
+        # Emit signal for network transmission
+        self.settings_applied.emit(self.ip, settings_dict)
+        
+        print(f"  ✓ Settings saved and emitted")
+        self.accept()
+    
+    def save_camera_settings(self, settings_dict):
+        """Save settings to JSON file"""
+        settings_file = self.get_settings_filename()
+        try:
+            with open(settings_file, "w") as f:
+                json.dump(settings_dict, f, indent=2)
+            print(f"  💾 Settings saved to {settings_file}")
+        except Exception as e:
+            print(f"  ✗ Error saving settings: {e}")
 
 
 # Test code
