@@ -1,0 +1,13 @@
+{
+  "iso": 1043,
+  "brightness": 45,
+  "flip_horizontal": false,
+  "flip_vertical": true,
+  "grayscale": true,
+  "rotation": 0,
+  "crop_enabled": false,
+  "crop_x": 0,
+  "crop_y": 0,
+  "crop_width": 100,
+  "crop_height": 100
+}

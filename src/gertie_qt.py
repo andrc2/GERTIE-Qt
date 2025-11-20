@@ -34,7 +34,7 @@ class CameraWidget(QWidget):
     """Widget representing a single camera with video feed and controls"""
     
     capture_requested = Signal(int, str)
-    settings_requested = Signal(int, str)  # NEW
+    settings_requested = Signal(int, str)  # camera_id, ip
     
     def __init__(self, camera_id: int, parent=None):
         super().__init__(parent)
@@ -283,9 +283,10 @@ class MainWindow(QMainWindow):
     
     def _on_camera_settings(self, camera_id: int, ip: str):
         """Handle camera settings dialog"""
-        print(f"\n⚙️ Opening settings for Camera {camera_id} ({ip})")
-        dialog = CameraSettingsDialog(camera_id, ip, self)
-        dialog.settings_changed.connect(self._on_settings_applied)
+        camera_name = f"REP{camera_id}"
+        print(f"\n⚙️ Opening settings for {camera_name} ({ip})")
+        dialog = CameraSettingsDialog(ip, camera_name, self)
+        dialog.settings_applied.connect(self._on_settings_applied)
         dialog.exec()
     
     def _on_settings_applied(self, ip: str, settings: dict):
