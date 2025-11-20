@@ -1,0 +1,13 @@
+{
+  "iso": 400,
+  "brightness": 0,
+  "flip_horizontal": true,
+  "flip_vertical": true,
+  "grayscale": true,
+  "rotation": 180,
+  "crop_enabled": true,
+  "crop_x": 100,
+  "crop_y": 200,
+  "crop_width": 640,
+  "crop_height": 480
+}

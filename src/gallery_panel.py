@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QPixmap
 from PIL import Image
+from image_viewer import ImageViewer
 
 
 class ThumbnailWidget(QFrame):
@@ -213,9 +214,25 @@ class GalleryPanel(QWidget):
         self.count_label.setText(f"{len(image_files)} images")
         
     def _on_thumbnail_clicked(self, filepath: str):
-        """Handle thumbnail click"""
-        print(f"Thumbnail clicked: {filepath}")
-        # Future: Open full-size viewer
+        """Handle thumbnail click - open full-size viewer"""
+        print(f"📷 Opening viewer: {filepath}")
+        
+        # Get all image files for navigation
+        image_files = sorted(
+            [str(f) for f in Path(self.captures_dir).glob("*.jpg")],
+            key=lambda x: os.path.getmtime(x),
+            reverse=True  # Newest first
+        )
+        
+        # Open viewer
+        viewer = ImageViewer(filepath, image_files, self)
+        viewer.image_deleted.connect(self._on_image_deleted)
+        viewer.exec()
+    
+    def _on_image_deleted(self, filepath: str):
+        """Handle image deletion from viewer"""
+        print(f"🗑️ Image deleted, refreshing gallery: {filepath}")
+        self.refresh_gallery()
         
     def stop_auto_refresh(self):
         """Stop auto-refresh timer"""
