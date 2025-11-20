@@ -27,12 +27,14 @@ from PIL.ImageQt import ImageQt
 from mock_camera import MockCameraSystem
 from network_manager import NetworkManager
 from gallery_panel import GalleryPanel
+from camera_settings_dialog import CameraSettingsDialog
 
 
 class CameraWidget(QWidget):
     """Widget representing a single camera with video feed and controls"""
     
     capture_requested = Signal(int, str)
+    settings_requested = Signal(int, str)  # NEW
     
     def __init__(self, camera_id: int, parent=None):
         super().__init__(parent)
@@ -89,10 +91,30 @@ class CameraWidget(QWidget):
         self.capture_btn.clicked.connect(self._on_capture)
         controls.addWidget(self.capture_btn)
         
+        # Settings button
+        self.settings_btn = QPushButton("⚙️")
+        self.settings_btn.setFixedSize(30, 25)
+        self.settings_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #555;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                font-size: 14px;
+            }
+            QPushButton:hover { background-color: #666; }
+            QPushButton:pressed { background-color: #444; }
+        """)
+        self.settings_btn.clicked.connect(self._on_settings)
+        controls.addWidget(self.settings_btn)
+        
         layout.addLayout(controls)
     
     def _on_capture(self):
         self.capture_requested.emit(self.camera_id, self.ip)
+    
+    def _on_settings(self):
+        self.settings_requested.emit(self.camera_id, self.ip)
     
     def update_frame(self, pixmap: QPixmap):
         self.video_label.setPixmap(pixmap)
@@ -129,7 +151,7 @@ class MainWindow(QMainWindow):
         self.timer.start(33)
         
         print("="*70)
-        print("GERTIE Qt - Phase 3 Complete: Capture + Gallery")
+        print("GERTIE Qt - Phase 3 Complete: Capture + Gallery + Settings")
         print("="*70)
         print("Controls:")
         print("  Space: Pause/Resume")
@@ -137,6 +159,7 @@ class MainWindow(QMainWindow):
         print("  G: Toggle gallery")
         print("  R: Reset stats")
         print("  Q: Quit")
+        print("  ⚙️ button: Per-camera settings")
         print("="*70)
     
     def _setup_ui(self):
@@ -163,6 +186,7 @@ class MainWindow(QMainWindow):
         for i in range(8):
             widget = CameraWidget(i + 1)
             widget.capture_requested.connect(self._on_camera_capture)
+            widget.settings_requested.connect(self._on_camera_settings)
             grid.addWidget(widget, i // 4, i % 4)
             self.camera_widgets.append(widget)
         
@@ -256,6 +280,19 @@ class MainWindow(QMainWindow):
         """Handle single camera capture"""
         self.network_manager.send_capture_command(ip, camera_id)
         self._save_mock_capture(camera_id)
+    
+    def _on_camera_settings(self, camera_id: int, ip: str):
+        """Handle camera settings dialog"""
+        print(f"\n⚙️ Opening settings for Camera {camera_id} ({ip})")
+        dialog = CameraSettingsDialog(camera_id, ip, self)
+        dialog.settings_changed.connect(self._on_settings_applied)
+        dialog.exec()
+    
+    def _on_settings_applied(self, ip: str, settings: dict):
+        """Handle settings applied"""
+        print(f"  ✓ Settings applied for {ip}")
+        # Send settings to camera via NetworkManager
+        self.network_manager.send_settings(ip, settings)
     
     def _on_capture_all(self):
         """Handle capture all"""
