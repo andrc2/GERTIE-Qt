@@ -1,421 +1,308 @@
 #!/usr/bin/env python3
 """
 Camera Settings Dialog for GERTIE Qt - PySide6 Implementation
-Per-camera control settings
+Part 1: UI Layout Only (no functionality yet)
 
-Features:
-- ISO control (100-1600)
-- Brightness (-50 to +50)
-- Contrast (0-100)
-- Saturation (0-100)
-- Flip horizontal/vertical
-- Grayscale mode
-- Rotation (0, 90, 180, 270)
-- Settings persistence (JSON)
-- Apply to camera via NetworkManager
+Compatible with original Tkinter system:
+- Same settings structure
+- Same value ranges
+- Same network commands
+- Per-camera settings persistence
 """
 
-import os
 import json
+import os
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-    QSlider, QCheckBox, QComboBox, QPushButton,
-    QGroupBox, QScrollArea, QWidget
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QPushButton, QSlider, QCheckBox, QGroupBox,
+    QComboBox, QScrollArea, QWidget, QSpinBox
 )
 from PySide6.QtCore import Qt, Signal
 
 
 class CameraSettingsDialog(QDialog):
-    """Dialog for per-camera settings"""
+    """Camera settings dialog - matches Tkinter functionality"""
     
-    settings_changed = Signal(str, dict)  # ip, settings
+    settings_applied = Signal(str, dict)  # ip, settings_dict
     
-    def __init__(self, camera_id: int, ip: str, parent=None):
+    def __init__(self, ip: str, camera_name: str, parent=None):
         super().__init__(parent)
-        self.camera_id = camera_id
         self.ip = ip
-        self.settings_file = f"camera_settings_{ip.replace('.', '_')}.json"
+        self.camera_name = camera_name
         
-        self.setWindowTitle(f"Camera Settings - REP{camera_id} ({ip})")
-        self.setModal(True)
-        self.setMinimumSize(500, 600)
+        # Load saved settings
+        self.settings = self.load_camera_settings()
         
-        # Load settings
-        self.settings = self._load_settings()
-        
-        # Setup UI
         self._setup_ui()
+        self._load_values()
         
-    def _load_settings(self) -> dict:
-        """Load settings from file or use defaults"""
-        if os.path.exists(self.settings_file):
-            try:
-                with open(self.settings_file, 'r') as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"Error loading settings: {e}")
-        
-        # Default settings
-        return {
-            'iso': 400,
-            'brightness': 0,
-            'contrast': 50,
-            'saturation': 50,
-            'flip_horizontal': False,
-            'flip_vertical': False,
-            'grayscale': False,
-            'rotation': 0
-        }
-    
-    def _save_settings(self):
-        """Save current settings to file"""
-        try:
-            with open(self.settings_file, 'w') as f:
-                json.dump(self.settings, f, indent=2)
-            print(f"✓ Settings saved for {self.ip}")
-        except Exception as e:
-            print(f"✗ Error saving settings: {e}")
-    
     def _setup_ui(self):
         """Setup the dialog UI"""
-        layout = QVBoxLayout()
-        layout.setSpacing(10)
-        self.setLayout(layout)
-        
-        # Header
-        header = QLabel(f"REP{self.camera_id} Camera Settings")
-        header.setStyleSheet("""
-            QLabel {
-                font-size: 18px;
-                font-weight: bold;
-                color: white;
-                padding: 10px;
-                background-color: #2a5;
-                border-radius: 5px;
-            }
-        """)
-        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(header)
-        
-        # Scrollable content
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; }")
-        
-        content_widget = QWidget()
-        content_layout = QVBoxLayout()
-        content_widget.setLayout(content_layout)
-        
-        # Exposure Controls
-        exposure_group = self._create_exposure_controls()
-        content_layout.addWidget(exposure_group)
-        
-        # Image Adjustments
-        image_group = self._create_image_adjustments()
-        content_layout.addWidget(image_group)
-        
-        # Transform Controls
-        transform_group = self._create_transform_controls()
-        content_layout.addWidget(transform_group)
-        
-        content_layout.addStretch()
-        
-        scroll.setWidget(content_widget)
-        layout.addWidget(scroll)
-        
-        # Bottom buttons
-        buttons = self._create_buttons()
-        layout.addLayout(buttons)
-        
-        # Apply dark theme
+        self.setWindowTitle(f"Camera Settings - {self.camera_name} ({self.ip})")
+        self.setMinimumSize(500, 600)
         self.setStyleSheet("""
             QDialog {
                 background-color: #1a1a1a;
+            }
+            QLabel {
                 color: white;
             }
             QGroupBox {
-                font-weight: bold;
+                color: white;
                 border: 2px solid #444;
                 border-radius: 5px;
                 margin-top: 10px;
                 padding-top: 10px;
-                color: white;
+                font-weight: bold;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 left: 10px;
                 padding: 0 5px;
             }
-            QLabel {
-                color: white;
-            }
-            QSlider::groove:horizontal {
-                height: 8px;
-                background: #444;
-                border-radius: 4px;
-            }
-            QSlider::handle:horizontal {
-                background: #2a5;
-                border: 1px solid #5a5;
-                width: 18px;
-                margin: -5px 0;
-                border-radius: 9px;
-            }
-            QSlider::handle:horizontal:hover {
-                background: #3b6;
-            }
-            QCheckBox {
-                color: white;
-                spacing: 8px;
-            }
-            QCheckBox::indicator {
-                width: 20px;
-                height: 20px;
-                border: 2px solid #444;
-                border-radius: 3px;
-                background: #222;
-            }
-            QCheckBox::indicator:checked {
-                background: #2a5;
-                border-color: #5a5;
-            }
-            QComboBox {
-                background: #333;
-                color: white;
-                border: 1px solid #444;
-                padding: 5px;
-                border-radius: 3px;
-            }
-            QComboBox::drop-down {
-                border: none;
-            }
-            QComboBox QAbstractItemView {
-                background: #333;
-                color: white;
-                selection-background-color: #2a5;
-            }
         """)
-    
-    def _create_exposure_controls(self) -> QGroupBox:
-        """Create exposure control group"""
-        group = QGroupBox("Exposure Controls")
-        layout = QVBoxLayout()
-        group.setLayout(layout)
+        
+        main_layout = QVBoxLayout()
+        main_layout.setSpacing(5)
+        self.setLayout(main_layout)
+        
+        # Title
+        title = QLabel(f"📷 {self.camera_name}")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; padding: 10px;")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(title)
+        
+        # Scroll area for settings
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+        
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout()
+        scroll_layout.setSpacing(10)
+        scroll_content.setLayout(scroll_layout)
+        
+        # === HARDWARE SETTINGS ===
+        hardware_group = QGroupBox("Hardware Settings")
+        hardware_layout = QVBoxLayout()
         
         # ISO
         iso_layout = QHBoxLayout()
-        iso_label = QLabel("ISO:")
-        iso_label.setMinimumWidth(100)
+        iso_layout.addWidget(QLabel("ISO:"))
         self.iso_slider = QSlider(Qt.Orientation.Horizontal)
         self.iso_slider.setMinimum(100)
         self.iso_slider.setMaximum(1600)
-        self.iso_slider.setValue(self.settings['iso'])
-        self.iso_value_label = QLabel(str(self.settings['iso']))
-        self.iso_value_label.setMinimumWidth(50)
-        self.iso_slider.valueChanged.connect(
-            lambda v: self.iso_value_label.setText(str(v))
-        )
-        iso_layout.addWidget(iso_label)
+        self.iso_slider.setValue(400)
+        self.iso_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.iso_slider.setTickInterval(100)
         iso_layout.addWidget(self.iso_slider)
-        iso_layout.addWidget(self.iso_value_label)
-        layout.addLayout(iso_layout)
+        self.iso_label = QLabel("400")
+        self.iso_label.setMinimumWidth(50)
+        self.iso_label.setStyleSheet("color: #0f0; font-weight: bold;")
+        iso_layout.addWidget(self.iso_label)
+        hardware_layout.addLayout(iso_layout)
         
         # Brightness
         brightness_layout = QHBoxLayout()
-        brightness_label = QLabel("Brightness:")
-        brightness_label.setMinimumWidth(100)
+        brightness_layout.addWidget(QLabel("Brightness:"))
         self.brightness_slider = QSlider(Qt.Orientation.Horizontal)
         self.brightness_slider.setMinimum(-50)
         self.brightness_slider.setMaximum(50)
-        self.brightness_slider.setValue(self.settings['brightness'])
-        self.brightness_value_label = QLabel(str(self.settings['brightness']))
-        self.brightness_value_label.setMinimumWidth(50)
-        self.brightness_slider.valueChanged.connect(
-            lambda v: self.brightness_value_label.setText(str(v))
-        )
-        brightness_layout.addWidget(brightness_label)
+        self.brightness_slider.setValue(0)
+        self.brightness_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.brightness_slider.setTickInterval(10)
         brightness_layout.addWidget(self.brightness_slider)
-        brightness_layout.addWidget(self.brightness_value_label)
-        layout.addLayout(brightness_layout)
+        self.brightness_label = QLabel("0")
+        self.brightness_label.setMinimumWidth(50)
+        self.brightness_label.setStyleSheet("color: #0f0; font-weight: bold;")
+        brightness_layout.addWidget(self.brightness_label)
+        hardware_layout.addLayout(brightness_layout)
         
-        return group
-    
-    def _create_image_adjustments(self) -> QGroupBox:
-        """Create image adjustment group"""
-        group = QGroupBox("Image Adjustments")
-        layout = QVBoxLayout()
-        group.setLayout(layout)
+        hardware_group.setLayout(hardware_layout)
+        scroll_layout.addWidget(hardware_group)
         
-        # Contrast
-        contrast_layout = QHBoxLayout()
-        contrast_label = QLabel("Contrast:")
-        contrast_label.setMinimumWidth(100)
-        self.contrast_slider = QSlider(Qt.Orientation.Horizontal)
-        self.contrast_slider.setMinimum(0)
-        self.contrast_slider.setMaximum(100)
-        self.contrast_slider.setValue(self.settings['contrast'])
-        self.contrast_value_label = QLabel(str(self.settings['contrast']))
-        self.contrast_value_label.setMinimumWidth(50)
-        self.contrast_slider.valueChanged.connect(
-            lambda v: self.contrast_value_label.setText(str(v))
-        )
-        contrast_layout.addWidget(contrast_label)
-        contrast_layout.addWidget(self.contrast_slider)
-        contrast_layout.addWidget(self.contrast_value_label)
-        layout.addLayout(contrast_layout)
+        # === IMAGE ADJUSTMENTS ===
+        adjustments_group = QGroupBox("Image Adjustments")
+        adjustments_layout = QVBoxLayout()
         
-        # Saturation
-        saturation_layout = QHBoxLayout()
-        saturation_label = QLabel("Saturation:")
-        saturation_label.setMinimumWidth(100)
-        self.saturation_slider = QSlider(Qt.Orientation.Horizontal)
-        self.saturation_slider.setMinimum(0)
-        self.saturation_slider.setMaximum(100)
-        self.saturation_slider.setValue(self.settings['saturation'])
-        self.saturation_value_label = QLabel(str(self.settings['saturation']))
-        self.saturation_value_label.setMinimumWidth(50)
-        self.saturation_slider.valueChanged.connect(
-            lambda v: self.saturation_value_label.setText(str(v))
-        )
-        saturation_layout.addWidget(saturation_label)
-        saturation_layout.addWidget(self.saturation_slider)
-        saturation_layout.addWidget(self.saturation_value_label)
-        layout.addLayout(saturation_layout)
-        
-        return group
-    
-    def _create_transform_controls(self) -> QGroupBox:
-        """Create transform control group"""
-        group = QGroupBox("Transform Controls")
-        layout = QVBoxLayout()
-        group.setLayout(layout)
-        
-        # Flip controls
-        flip_layout = QHBoxLayout()
+        # Flip Horizontal
         self.flip_h_checkbox = QCheckBox("Flip Horizontal")
-        self.flip_h_checkbox.setChecked(self.settings['flip_horizontal'])
+        self.flip_h_checkbox.setStyleSheet("color: white;")
+        adjustments_layout.addWidget(self.flip_h_checkbox)
+        
+        # Flip Vertical
         self.flip_v_checkbox = QCheckBox("Flip Vertical")
-        self.flip_v_checkbox.setChecked(self.settings['flip_vertical'])
-        flip_layout.addWidget(self.flip_h_checkbox)
-        flip_layout.addWidget(self.flip_v_checkbox)
-        flip_layout.addStretch()
-        layout.addLayout(flip_layout)
+        self.flip_v_checkbox.setStyleSheet("color: white;")
+        adjustments_layout.addWidget(self.flip_v_checkbox)
         
         # Grayscale
-        self.grayscale_checkbox = QCheckBox("Grayscale Mode")
-        self.grayscale_checkbox.setChecked(self.settings['grayscale'])
-        layout.addWidget(self.grayscale_checkbox)
+        self.grayscale_checkbox = QCheckBox("Grayscale")
+        self.grayscale_checkbox.setStyleSheet("color: white;")
+        adjustments_layout.addWidget(self.grayscale_checkbox)
         
         # Rotation
         rotation_layout = QHBoxLayout()
-        rotation_label = QLabel("Rotation:")
-        rotation_label.setMinimumWidth(100)
+        rotation_layout.addWidget(QLabel("Rotation:"))
         self.rotation_combo = QComboBox()
         self.rotation_combo.addItems(["0°", "90°", "180°", "270°"])
-        rotation_index = [0, 90, 180, 270].index(self.settings['rotation'])
-        self.rotation_combo.setCurrentIndex(rotation_index)
-        rotation_layout.addWidget(rotation_label)
+        self.rotation_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #333;
+                color: white;
+                border: 1px solid #555;
+                padding: 5px;
+            }
+        """)
         rotation_layout.addWidget(self.rotation_combo)
         rotation_layout.addStretch()
-        layout.addLayout(rotation_layout)
+        adjustments_layout.addLayout(rotation_layout)
         
-        return group
-    
-    def _create_buttons(self) -> QHBoxLayout:
-        """Create bottom button layout"""
-        layout = QHBoxLayout()
+        adjustments_group.setLayout(adjustments_layout)
+        scroll_layout.addWidget(adjustments_group)
         
-        # Reset button
-        reset_btn = QPushButton("Reset to Defaults")
-        reset_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #c44;
-                color: white;
-                border: none;
-                padding: 8px 20px;
-                border-radius: 5px;
-                font-weight: bold;
-            }
-            QPushButton:hover { background-color: #d55; }
-            QPushButton:pressed { background-color: #a33; }
-        """)
-        reset_btn.clicked.connect(self._reset_defaults)
-        layout.addWidget(reset_btn)
+        # === CROP SETTINGS ===
+        crop_group = QGroupBox("Crop Settings")
+        crop_layout = QVBoxLayout()
         
-        layout.addStretch()
+        # Crop Enabled
+        self.crop_enabled_checkbox = QCheckBox("Enable Crop")
+        self.crop_enabled_checkbox.setStyleSheet("color: white; font-weight: bold;")
+        crop_layout.addWidget(self.crop_enabled_checkbox)
         
-        # Cancel button
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #555;
-                color: white;
-                border: none;
-                padding: 8px 20px;
-                border-radius: 5px;
-            }
-            QPushButton:hover { background-color: #666; }
-        """)
-        cancel_btn.clicked.connect(self.reject)
-        layout.addWidget(cancel_btn)
+        # Crop Coordinates
+        crop_coords_layout = QHBoxLayout()
         
-        # Apply button
-        apply_btn = QPushButton("Apply Settings")
-        apply_btn.setStyleSheet("""
+        crop_coords_layout.addWidget(QLabel("X:"))
+        self.crop_x_spin = QSpinBox()
+        self.crop_x_spin.setRange(0, 4608)
+        self.crop_x_spin.setStyleSheet("background-color: #333; color: white;")
+        crop_coords_layout.addWidget(self.crop_x_spin)
+        
+        crop_coords_layout.addWidget(QLabel("Y:"))
+        self.crop_y_spin = QSpinBox()
+        self.crop_y_spin.setRange(0, 2592)
+        self.crop_y_spin.setStyleSheet("background-color: #333; color: white;")
+        crop_coords_layout.addWidget(self.crop_y_spin)
+        
+        crop_coords_layout.addWidget(QLabel("W:"))
+        self.crop_w_spin = QSpinBox()
+        self.crop_w_spin.setRange(1, 4608)
+        self.crop_w_spin.setValue(100)
+        self.crop_w_spin.setStyleSheet("background-color: #333; color: white;")
+        crop_coords_layout.addWidget(self.crop_w_spin)
+        
+        crop_coords_layout.addWidget(QLabel("H:"))
+        self.crop_h_spin = QSpinBox()
+        self.crop_h_spin.setRange(1, 2592)
+        self.crop_h_spin.setValue(100)
+        self.crop_h_spin.setStyleSheet("background-color: #333; color: white;")
+        crop_coords_layout.addWidget(self.crop_h_spin)
+        
+        crop_layout.addLayout(crop_coords_layout)
+        
+        crop_group.setLayout(crop_layout)
+        scroll_layout.addWidget(crop_group)
+        
+        scroll_layout.addStretch()
+        
+        scroll.setWidget(scroll_content)
+        main_layout.addWidget(scroll)
+        
+        # === BUTTONS ===
+        button_layout = QHBoxLayout()
+        
+        self.apply_btn = QPushButton("✓ Apply Settings")
+        self.apply_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a5;
                 color: white;
                 border: none;
-                padding: 8px 20px;
+                padding: 10px 20px;
                 border-radius: 5px;
                 font-weight: bold;
+                font-size: 14px;
             }
             QPushButton:hover { background-color: #3b6; }
             QPushButton:pressed { background-color: #194; }
         """)
-        apply_btn.clicked.connect(self._apply_settings)
-        layout.addWidget(apply_btn)
+        button_layout.addWidget(self.apply_btn)
         
-        return layout
+        button_layout.addStretch()
+        
+        self.cancel_btn = QPushButton("✗ Cancel")
+        self.cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #a44;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover { background-color: #b55; }
+            QPushButton:pressed { background-color: #933; }
+        """)
+        self.cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(self.cancel_btn)
+        
+        main_layout.addLayout(button_layout)
+        
+        # Connect slider value changes to labels (UI feedback only)
+        self.iso_slider.valueChanged.connect(
+            lambda v: self.iso_label.setText(str(v))
+        )
+        self.brightness_slider.valueChanged.connect(
+            lambda v: self.brightness_label.setText(str(v))
+        )
     
-    def _reset_defaults(self):
-        """Reset all settings to defaults"""
-        self.iso_slider.setValue(400)
-        self.brightness_slider.setValue(0)
-        self.contrast_slider.setValue(50)
-        self.saturation_slider.setValue(50)
-        self.flip_h_checkbox.setChecked(False)
-        self.flip_v_checkbox.setChecked(False)
-        self.grayscale_checkbox.setChecked(False)
-        self.rotation_combo.setCurrentIndex(0)
-        print(f"Reset settings for {self.ip} to defaults")
+    def _load_values(self):
+        """Load saved values into UI widgets"""
+        self.iso_slider.setValue(self.settings.get("iso", 400))
+        self.brightness_slider.setValue(self.settings.get("brightness", 0))
+        self.flip_h_checkbox.setChecked(self.settings.get("flip_horizontal", False))
+        self.flip_v_checkbox.setChecked(self.settings.get("flip_vertical", False))
+        self.grayscale_checkbox.setChecked(self.settings.get("grayscale", False))
+        
+        rotation = self.settings.get("rotation", 0)
+        rotation_index = {0: 0, 90: 1, 180: 2, 270: 3}.get(rotation, 0)
+        self.rotation_combo.setCurrentIndex(rotation_index)
+        
+        self.crop_enabled_checkbox.setChecked(self.settings.get("crop_enabled", False))
+        self.crop_x_spin.setValue(self.settings.get("crop_x", 0))
+        self.crop_y_spin.setValue(self.settings.get("crop_y", 0))
+        self.crop_w_spin.setValue(self.settings.get("crop_width", 100))
+        self.crop_h_spin.setValue(self.settings.get("crop_height", 100))
     
-    def _apply_settings(self):
-        """Apply and save settings"""
-        # Update settings dict
-        self.settings = {
-            'iso': self.iso_slider.value(),
-            'brightness': self.brightness_slider.value(),
-            'contrast': self.contrast_slider.value(),
-            'saturation': self.saturation_slider.value(),
-            'flip_horizontal': self.flip_h_checkbox.isChecked(),
-            'flip_vertical': self.flip_v_checkbox.isChecked(),
-            'grayscale': self.grayscale_checkbox.isChecked(),
-            'rotation': [0, 90, 180, 270][self.rotation_combo.currentIndex()]
+    def get_settings_filename(self):
+        """Get settings filename for this camera"""
+        safe_ip = self.ip.replace(".", "_").replace(":", "_")
+        return f"camera_settings_{safe_ip}.json"
+    
+    def load_camera_settings(self):
+        """Load persisted settings for this camera"""
+        settings_file = self.get_settings_filename()
+        try:
+            if os.path.exists(settings_file):
+                with open(settings_file, "r") as f:
+                    return json.load(f)
+        except Exception as e:
+            print(f"Error loading settings for {self.ip}: {e}")
+        
+        # Return defaults matching original system
+        return {
+            "iso": 400,
+            "brightness": 0,
+            "flip_horizontal": False,
+            "flip_vertical": False,
+            "grayscale": False,
+            "rotation": 0,
+            "crop_enabled": False,
+            "crop_x": 0,
+            "crop_y": 0,
+            "crop_width": 100,
+            "crop_height": 100,
         }
-        
-        # Save to file
-        self._save_settings()
-        
-        # Emit signal
-        self.settings_changed.emit(self.ip, self.settings)
-        
-        print(f"\n📸 Applied settings for REP{self.camera_id}:")
-        for key, value in self.settings.items():
-            print(f"  {key}: {value}")
-        
-        # Close dialog
-        self.accept()
 
 
 # Test code
@@ -423,26 +310,15 @@ if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
     import sys
     
-    print("Camera Settings Dialog Test")
+    print("Camera Settings Dialog - UI Test (Part 1)")
+    print("="*60)
     
     app = QApplication(sys.argv)
     
-    # Create dialog
-    dialog = CameraSettingsDialog(1, "192.168.0.201")
+    # Create test dialog
+    dialog = CameraSettingsDialog("192.168.0.201", "REP1")
+    dialog.show()
     
-    # Connect signal
-    def on_settings_changed(ip, settings):
-        print(f"\n✓ Settings applied for {ip}:")
-        print(f"  Settings: {settings}")
-    
-    dialog.settings_changed.connect(on_settings_changed)
-    
-    # Show
-    result = dialog.exec()
-    
-    if result == QDialog.DialogCode.Accepted:
-        print("\n✓ Dialog accepted")
-    else:
-        print("\n✗ Dialog cancelled")
-    
-    sys.exit(0)
+    exit_code = app.exec()
+    print(f"\n✓ Dialog test complete (exit code: {exit_code})")
+    sys.exit(exit_code)
