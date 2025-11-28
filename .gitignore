@@ -51,3 +51,11 @@ tests/mock_data/*.mp4
 
 # Deployment
 DEPLOY_NOW.txt
+
+# Test artifacts
+src/mock_captures/
+src/camera_settings_*.json
+tests/performance_results.txt
+__pycache__/
+*.pyc
+.DS_Store
