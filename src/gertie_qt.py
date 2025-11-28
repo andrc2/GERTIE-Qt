@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """
 GERTIE Qt - Complete Camera System with Gallery
-Phase 3: Still Capture + Gallery Integration
+Phase 3: Still Capture + Gallery Integration + Network Commands
 
 Features:
 - 8-camera grid display
 - Still capture functionality
 - Gallery panel with auto-refresh
 - Integrated layout with toggle
+- Complete network command support
+- Mock/Real network mode toggle
 """
 
 import sys
 import os
 import time
+import logging
 from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QGridLayout, 
@@ -28,6 +31,7 @@ from mock_camera import MockCameraSystem
 from network_manager import NetworkManager
 from gallery_panel import GalleryPanel
 from camera_settings_dialog import CameraSettingsDialog
+from config import get_ip_from_camera_id, SLAVES
 
 
 class CameraWidget(QWidget):
@@ -39,7 +43,7 @@ class CameraWidget(QWidget):
     def __init__(self, camera_id: int, parent=None):
         super().__init__(parent)
         self.camera_id = camera_id
-        self.ip = f"192.168.0.{200 + camera_id}"
+        self.ip = get_ip_from_camera_id(camera_id)  # Use config for correct IP
         
         self._setup_ui()
     
@@ -151,15 +155,20 @@ class MainWindow(QMainWindow):
         self.timer.start(33)
         
         print("="*70)
-        print("GERTIE Qt - Phase 3 Complete: Capture + Gallery + Settings")
+        print("GERTIE Qt - Phase 3: Capture + Gallery + Network")
         print("="*70)
         print("Controls:")
-        print("  Space: Pause/Resume")
+        print("  Space: Pause/Resume video")
         print("  C: Capture all cameras")
         print("  G: Toggle gallery")
+        print("  M: Toggle Mock/Real network mode")
         print("  R: Reset stats")
         print("  Q: Quit")
         print("  ⚙️ button: Per-camera settings")
+        print("")
+        print("Network Mode:")
+        print("  🔧 MOCK MODE: Simulates commands (no Pi required)")
+        print("  📡 REAL NETWORK: Sends UDP to Pi cameras")
         print("="*70)
     
     def _setup_ui(self):
@@ -212,6 +221,31 @@ class MainWindow(QMainWindow):
         controls.addWidget(capture_all_btn)
         
         controls.addStretch()
+        
+        # Network mode toggle button
+        self.network_mode_btn = QPushButton("🔧 MOCK MODE")
+        self.network_mode_btn.setCheckable(True)
+        self.network_mode_btn.setChecked(True)  # Start in mock mode
+        self.network_mode_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #a52;
+                color: white;
+                border: none;
+                padding: 8px 15px;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:checked {
+                background-color: #a52;
+            }
+            QPushButton:!checked {
+                background-color: #2a5;
+            }
+            QPushButton:hover { opacity: 0.9; }
+        """)
+        self.network_mode_btn.clicked.connect(self._toggle_network_mode)
+        controls.addWidget(self.network_mode_btn)
         
         # Toggle gallery button
         self.toggle_gallery_btn = QPushButton("📁 Gallery (G)")
@@ -298,10 +332,10 @@ class MainWindow(QMainWindow):
     def _on_capture_all(self):
         """Handle capture all"""
         print("\n📷 Capturing all cameras...")
-        for i in range(8):
-            camera_id = i + 1
-            ip = f"192.168.0.{200 + camera_id}"
-            self.network_manager.send_capture_command(ip, camera_id)
+        # Use NetworkManager's batch function for correct IPs
+        self.network_manager.send_capture_all()
+        # Save mock captures locally
+        for camera_id in range(1, 9):
             self._save_mock_capture(camera_id)
     
     def _save_mock_capture(self, camera_id: int):
@@ -325,6 +359,42 @@ class MainWindow(QMainWindow):
         """Toggle gallery visibility"""
         self.gallery.setVisible(self.toggle_gallery_btn.isChecked())
     
+    def _toggle_network_mode(self):
+        """Toggle between mock and real network mode"""
+        mock_mode = self.network_mode_btn.isChecked()
+        self.network_manager.set_mock_mode(mock_mode)
+        
+        if mock_mode:
+            self.network_mode_btn.setText("🔧 MOCK MODE")
+            self.network_mode_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #a52;
+                    color: white;
+                    border: none;
+                    padding: 8px 15px;
+                    border-radius: 5px;
+                    font-weight: bold;
+                    font-size: 11px;
+                }
+                QPushButton:hover { opacity: 0.9; }
+            """)
+            print("\n🔧 Switched to MOCK MODE (no network traffic)")
+        else:
+            self.network_mode_btn.setText("📡 REAL NETWORK")
+            self.network_mode_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #2a5;
+                    color: white;
+                    border: none;
+                    padding: 8px 15px;
+                    border-radius: 5px;
+                    font-weight: bold;
+                    font-size: 11px;
+                }
+                QPushButton:hover { opacity: 0.9; }
+            """)
+            print("\n📡 Switched to REAL NETWORK MODE (commands sent to Pi cameras)")
+    
     def keyPressEvent(self, event):
         """Handle keyboard"""
         key = event.key()
@@ -345,6 +415,9 @@ class MainWindow(QMainWindow):
         
         elif key == Qt.Key.Key_G:
             self.toggle_gallery_btn.click()
+        
+        elif key == Qt.Key.Key_M:
+            self.network_mode_btn.click()
         
         elif key == Qt.Key.Key_Q:
             self.close()
@@ -369,6 +442,13 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    # Setup logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S"
+    )
+    
     app = QApplication(sys.argv)
     
     # Dark theme
