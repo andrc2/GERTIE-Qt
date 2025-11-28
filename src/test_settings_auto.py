@@ -14,8 +14,7 @@ import os
 import json
 sys.path.insert(0, os.path.dirname(__file__))
 
-from PySide6.QtWidgets import QApplication, QDialog
-from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication
 from camera_settings_dialog import CameraSettingsDialog
 
 
@@ -43,12 +42,10 @@ def run_automated_settings_test():
         'values_match': False
     }
     
-    # Test settings
+    # Test settings (matching actual dialog controls)
     test_settings = {
         'iso': 800,
         'brightness': 25,
-        'contrast': 75,
-        'saturation': 60,
         'flip_horizontal': True,
         'flip_vertical': False,
         'grayscale': True,
@@ -58,15 +55,14 @@ def run_automated_settings_test():
     print("\n1. Creating settings dialog...")
     camera_id = 1
     ip = "192.168.0.201"
-    dialog = CameraSettingsDialog(camera_id, ip)
+    camera_name = f"REP{camera_id}"
+    dialog = CameraSettingsDialog(ip, camera_name)
     test_results['dialog_created'] = True
     print("  ✓ Dialog created")
     
     print("\n2. Modifying settings programmatically...")
     dialog.iso_slider.setValue(test_settings['iso'])
     dialog.brightness_slider.setValue(test_settings['brightness'])
-    dialog.contrast_slider.setValue(test_settings['contrast'])
-    dialog.saturation_slider.setValue(test_settings['saturation'])
     dialog.flip_h_checkbox.setChecked(test_settings['flip_horizontal'])
     dialog.flip_v_checkbox.setChecked(test_settings['flip_vertical'])
     dialog.grayscale_checkbox.setChecked(test_settings['grayscale'])
@@ -82,30 +78,31 @@ def run_automated_settings_test():
     # Connect signal to track application
     settings_applied = {'done': False, 'ip': None, 'settings': None}
     
-    def on_settings_changed(ip, settings):
+    def on_settings_applied(ip, settings):
         settings_applied['done'] = True
         settings_applied['ip'] = ip
         settings_applied['settings'] = settings
     
-    dialog.settings_changed.connect(on_settings_changed)
+    dialog.settings_applied.connect(on_settings_applied)
     
     # Trigger apply (simulates clicking Apply button)
-    dialog._apply_settings()
+    dialog.apply_settings()
     
     if settings_applied['done']:
         test_results['settings_applied'] = True
         print("  ✓ Settings applied signal received")
     
     # Check if file was saved
-    if os.path.exists(dialog.settings_file):
+    settings_file = dialog.get_settings_filename()
+    if os.path.exists(settings_file):
         test_results['file_saved'] = True
-        print(f"  ✓ Settings file saved: {dialog.settings_file}")
+        print(f"  ✓ Settings file saved: {settings_file}")
     else:
-        print(f"  ✗ Settings file not found: {dialog.settings_file}")
+        print(f"  ✗ Settings file not found: {settings_file}")
     
     print("\n4. Verifying settings in file...")
     try:
-        with open(dialog.settings_file, 'r') as f:
+        with open(settings_file, 'r') as f:
             saved_settings = json.load(f)
         test_results['settings_reloaded'] = True
         print("  ✓ Settings loaded from file:")
@@ -129,15 +126,14 @@ def run_automated_settings_test():
     
     print("\n5. Testing settings persistence...")
     # Create new dialog to verify settings load correctly
-    dialog2 = CameraSettingsDialog(camera_id, ip)
+    dialog2 = CameraSettingsDialog(ip, camera_name)
     
     persistence_ok = True
     checks = [
         ('iso', dialog2.iso_slider.value(), test_settings['iso']),
         ('brightness', dialog2.brightness_slider.value(), test_settings['brightness']),
-        ('contrast', dialog2.contrast_slider.value(), test_settings['contrast']),
-        ('saturation', dialog2.saturation_slider.value(), test_settings['saturation']),
         ('flip_horizontal', dialog2.flip_h_checkbox.isChecked(), test_settings['flip_horizontal']),
+        ('flip_vertical', dialog2.flip_v_checkbox.isChecked(), test_settings['flip_vertical']),
         ('grayscale', dialog2.grayscale_checkbox.isChecked(), test_settings['grayscale']),
     ]
     
@@ -145,6 +141,8 @@ def run_automated_settings_test():
         if actual != expected:
             persistence_ok = False
             print(f"  ✗ {name}: {actual} != {expected}")
+        else:
+            print(f"  ✓ {name}: {actual}")
     
     if persistence_ok:
         print("  ✓ Settings persistence verified")
@@ -173,20 +171,20 @@ def run_automated_settings_test():
     ])
     
     if success:
-        print("\n✓ TEST PASSED - Camera settings system working correctly!")
+        print("\n✅ TEST PASSED - Camera settings system working correctly!")
         print("  - Dialog creates successfully")
         print("  - Settings can be modified")
         print("  - Settings save to JSON")
         print("  - Settings persist across sessions")
     else:
-        print("\n✗ TEST FAILED - One or more checks failed")
+        print("\n❌ TEST FAILED - One or more checks failed")
     
     print("="*70)
     
     # Cleanup
-    if os.path.exists(dialog.settings_file):
-        os.remove(dialog.settings_file)
-        print(f"\n✓ Cleaned up test file: {dialog.settings_file}")
+    if os.path.exists(settings_file):
+        os.remove(settings_file)
+        print(f"\n✓ Cleaned up test file: {settings_file}")
     
     return 0 if success else 1
 
