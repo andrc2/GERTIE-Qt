@@ -448,9 +448,11 @@ class VideoReceiver(QThread):
             self.socket.bind(("0.0.0.0", VIDEO_PORT))
             
             logger.info(f"[VIDEO_RX] Listening on port {VIDEO_PORT}")
+            logger.info(f"[VIDEO_RX] Valid slave IPs: {[config['ip'] for config in SLAVES.values()]}")
             
             # Get valid slave IPs
             slave_ips = [config["ip"] for config in SLAVES.values()]
+            frames_ignored_mock = 0
             
             while self.running:
                 try:
@@ -458,6 +460,9 @@ class VideoReceiver(QThread):
                     
                     # Skip frames in mock mode
                     if self.mock_mode:
+                        frames_ignored_mock += 1
+                        if frames_ignored_mock == 1:
+                            logger.info(f"[VIDEO_RX] Ignoring frames in mock mode (first from {addr[0]})")
                         continue
                     
                     ip = addr[0]
@@ -469,11 +474,18 @@ class VideoReceiver(QThread):
                         # Track statistics
                         if ip not in self.frames_received:
                             self.frames_received[ip] = 0
+                            logger.info(f"[VIDEO_RX] First frame from {ip} (camera {camera_id})")
                         self.frames_received[ip] += 1
                         self.last_frame_time[ip] = time.time()
                         
+                        # Log every 100 frames
+                        if self.frames_received[ip] % 100 == 0:
+                            logger.info(f"[VIDEO_RX] {ip}: {self.frames_received[ip]} frames received")
+                        
                         # Emit frame for processing
                         self.frame_received.emit(ip, camera_id, data)
+                    else:
+                        logger.warning(f"[VIDEO_RX] Rejected frame from unknown IP: {ip}")
                         
                 except socket.timeout:
                     continue
