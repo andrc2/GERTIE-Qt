@@ -437,14 +437,8 @@ class VideoReceiver(QThread):
         logger.info("[VIDEO_RX] VideoReceiver initialized")
     
     def run(self):
-        """Main receive loop"""
+        """Main receive loop - always listens, only emits in real mode"""
         logger.info("[VIDEO_RX] Receiver thread started")
-        
-        if self.mock_mode:
-            # In mock mode, don't actually listen
-            while self.running:
-                self.msleep(100)
-            return
         
         try:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -461,6 +455,11 @@ class VideoReceiver(QThread):
             while self.running:
                 try:
                     data, addr = self.socket.recvfrom(65536)
+                    
+                    # Skip frames in mock mode
+                    if self.mock_mode:
+                        continue
+                    
                     ip = addr[0]
                     
                     # Accept frames from configured slaves
