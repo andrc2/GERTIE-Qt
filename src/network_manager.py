@@ -27,7 +27,7 @@ from PySide6.QtCore import QThread, Signal, QObject, QMutex, QMutexLocker
 # Import config
 from config import (
     SLAVES, MASTER_IP, get_slave_ports, get_camera_id_from_ip,
-    is_local_camera, STILL_PORT, HEARTBEAT_PORT, VIDEO_PORT
+    is_local_camera, STILL_PORT, HEARTBEAT_PORT, VIDEO_PORT, LOCAL_VIDEO_PORT
 )
 
 # Setup module logging
@@ -429,6 +429,7 @@ class VideoReceiver(QThread):
         self.running = True
         self.mock_mode = True
         self.socket = None
+        self.local_socket = None  # Second socket for local camera (port 5012)
         
         # Frame statistics
         self.frames_received = {}
@@ -438,66 +439,86 @@ class VideoReceiver(QThread):
     
     def run(self):
         """Main receive loop - always listens, only emits in real mode"""
+        import select
         logger.info("[VIDEO_RX] Receiver thread started")
         
         try:
+            # Create socket for remote cameras (port 5002)
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
-            self.socket.settimeout(0.5)
+            self.socket.setblocking(False)
             self.socket.bind(("0.0.0.0", VIDEO_PORT))
             
-            logger.info(f"[VIDEO_RX] Listening on port {VIDEO_PORT}")
+            # Create socket for local camera (port 5012)
+            self.local_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.local_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.local_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
+            self.local_socket.setblocking(False)
+            self.local_socket.bind(("0.0.0.0", LOCAL_VIDEO_PORT))
+            
+            logger.info(f"[VIDEO_RX] Listening on port {VIDEO_PORT} (remote) and {LOCAL_VIDEO_PORT} (local)")
             logger.info(f"[VIDEO_RX] Valid slave IPs: {[config['ip'] for config in SLAVES.values()]}")
             
             # Get valid slave IPs
             slave_ips = [config["ip"] for config in SLAVES.values()]
             frames_ignored_mock = 0
+            sockets = [self.socket, self.local_socket]
             
             while self.running:
                 try:
-                    data, addr = self.socket.recvfrom(65536)
+                    # Wait for data on either socket (0.5s timeout)
+                    readable, _, _ = select.select(sockets, [], [], 0.5)
                     
-                    # Skip frames in mock mode
-                    if self.mock_mode:
-                        frames_ignored_mock += 1
-                        if frames_ignored_mock == 1:
-                            logger.info(f"[VIDEO_RX] Ignoring frames in mock mode (first from {addr[0]})")
-                        continue
-                    
-                    ip = addr[0]
-                    
-                    # Accept frames from configured slaves
-                    if ip in slave_ips or ip in ("127.0.0.1", "localhost"):
-                        camera_id = get_camera_id_from_ip(ip)
+                    for sock in readable:
+                        try:
+                            data, addr = sock.recvfrom(65536)
+                            
+                            # Skip frames in mock mode
+                            if self.mock_mode:
+                                frames_ignored_mock += 1
+                                if frames_ignored_mock == 1:
+                                    logger.info(f"[VIDEO_RX] Ignoring frames in mock mode (first from {addr[0]})")
+                                continue
+                            
+                            ip = addr[0]
+                            
+                            # Accept frames from configured slaves
+                            if ip in slave_ips or ip in ("127.0.0.1", "localhost"):
+                                camera_id = get_camera_id_from_ip(ip)
+                                
+                                # Track statistics
+                                if ip not in self.frames_received:
+                                    self.frames_received[ip] = 0
+                                    logger.info(f"[VIDEO_RX] First frame from {ip} (camera {camera_id})")
+                                self.frames_received[ip] += 1
+                                self.last_frame_time[ip] = time.time()
+                                
+                                # Log every 100 frames
+                                if self.frames_received[ip] % 100 == 0:
+                                    logger.info(f"[VIDEO_RX] {ip}: {self.frames_received[ip]} frames received")
+                                
+                                # Emit frame for processing
+                                self.frame_received.emit(ip, camera_id, data)
+                            else:
+                                logger.warning(f"[VIDEO_RX] Rejected frame from unknown IP: {ip}")
+                        except BlockingIOError:
+                            continue
+                        except Exception as e:
+                            if self.running:
+                                logger.warning(f"[VIDEO_RX] Receive error: {e}")
                         
-                        # Track statistics
-                        if ip not in self.frames_received:
-                            self.frames_received[ip] = 0
-                            logger.info(f"[VIDEO_RX] First frame from {ip} (camera {camera_id})")
-                        self.frames_received[ip] += 1
-                        self.last_frame_time[ip] = time.time()
-                        
-                        # Log every 100 frames
-                        if self.frames_received[ip] % 100 == 0:
-                            logger.info(f"[VIDEO_RX] {ip}: {self.frames_received[ip]} frames received")
-                        
-                        # Emit frame for processing
-                        self.frame_received.emit(ip, camera_id, data)
-                    else:
-                        logger.warning(f"[VIDEO_RX] Rejected frame from unknown IP: {ip}")
-                        
-                except socket.timeout:
-                    continue
                 except Exception as e:
                     if self.running:
-                        logger.warning(f"[VIDEO_RX] Receive error: {e}")
+                        logger.warning(f"[VIDEO_RX] Select error: {e}")
                         
         except Exception as e:
             logger.error(f"[VIDEO_RX] Setup error: {e}")
         finally:
             if self.socket:
                 self.socket.close()
+            if self.local_socket:
+                self.local_socket.close()
                 
         logger.info("[VIDEO_RX] Receiver thread stopped")
     
