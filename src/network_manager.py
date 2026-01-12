@@ -501,7 +501,7 @@ class NetworkManager(QObject):
         command = NetworkCommand(
             ip=ip,
             command="CAPTURE_STILL",
-            port=ports['still'],
+            port=ports['control'],
             command_type=CommandType.CAPTURE,
             priority=CommandPriority.HIGH,
             camera_id=camera_id
