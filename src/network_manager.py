@@ -27,7 +27,8 @@ from PySide6.QtCore import QThread, Signal, QObject, QMutex, QMutexLocker
 # Import config
 from config import (
     SLAVES, MASTER_IP, get_slave_ports, get_camera_id_from_ip,
-    is_local_camera, STILL_PORT, HEARTBEAT_PORT, VIDEO_PORT, LOCAL_VIDEO_PORT
+    is_local_camera, STILL_PORT, HEARTBEAT_PORT, VIDEO_PORT, LOCAL_VIDEO_PORT,
+    LOCAL_STILL_PORT
 )
 
 # Setup module logging
@@ -541,6 +542,132 @@ class VideoReceiver(QThread):
 
 
 # =============================================================================
+# STILL IMAGE RECEIVER (TCP)
+# =============================================================================
+
+class StillReceiver(QThread):
+    """Receive high-resolution still images from cameras via TCP"""
+    
+    # Signal: camera_id, image_data (bytes), timestamp
+    still_received = Signal(int, bytes, str)
+    
+    def __init__(self):
+        super().__init__()
+        self.running = True
+        self.remote_socket = None  # Port 6000 for rep1-7
+        self.local_socket = None   # Port 6010 for rep8
+        
+        logger.info("[STILL_RX] StillReceiver initialized")
+    
+    def run(self):
+        """Main receive loop - listens on TCP ports 6000 and 6010"""
+        import select
+        logger.info("[STILL_RX] Receiver thread started")
+        
+        try:
+            # Create TCP server socket for remote cameras (port 6000)
+            self.remote_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.remote_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.remote_socket.setblocking(False)
+            self.remote_socket.bind(("0.0.0.0", STILL_PORT))
+            self.remote_socket.listen(8)
+            
+            # Create TCP server socket for local camera (port 6010)
+            self.local_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.local_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.local_socket.setblocking(False)
+            self.local_socket.bind(("0.0.0.0", LOCAL_STILL_PORT))
+            self.local_socket.listen(1)
+            
+            logger.info(f"[STILL_RX] Listening on TCP port {STILL_PORT} (remote) and {LOCAL_STILL_PORT} (local)")
+            
+            server_sockets = [self.remote_socket, self.local_socket]
+            
+            while self.running:
+                try:
+                    # Wait for connections (0.5s timeout)
+                    readable, _, _ = select.select(server_sockets, [], [], 0.5)
+                    
+                    for server_sock in readable:
+                        try:
+                            conn, addr = server_sock.accept()
+                            conn.settimeout(30.0)
+                            
+                            ip = addr[0]
+                            camera_id = get_camera_id_from_ip(ip)
+                            if ip == MASTER_IP:
+                                camera_id = 8
+                            
+                            logger.info(f"[STILL_RX] Connection from {ip} (camera {camera_id})")
+                            
+                            # Receive image data in a separate thread to not block
+                            import threading
+                            threading.Thread(
+                                target=self._receive_image,
+                                args=(conn, ip, camera_id),
+                                daemon=True
+                            ).start()
+                            
+                        except BlockingIOError:
+                            continue
+                        except Exception as e:
+                            logger.warning(f"[STILL_RX] Accept error: {e}")
+                            
+                except Exception as e:
+                    if self.running:
+                        logger.warning(f"[STILL_RX] Select error: {e}")
+                        
+        except Exception as e:
+            logger.error(f"[STILL_RX] Setup error: {e}")
+        finally:
+            if self.remote_socket:
+                self.remote_socket.close()
+            if self.local_socket:
+                self.local_socket.close()
+                
+        logger.info("[STILL_RX] Receiver thread stopped")
+    
+    def _receive_image(self, conn, ip, camera_id):
+        """Receive complete image from connection"""
+        try:
+            chunks = []
+            total_size = 0
+            
+            while True:
+                chunk = conn.recv(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total_size += len(chunk)
+            
+            conn.close()
+            
+            if total_size > 0:
+                image_data = b''.join(chunks)
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                
+                logger.info(f"[STILL_RX] Received {total_size} bytes from camera {camera_id} ({ip})")
+                
+                # Emit signal with image data
+                self.still_received.emit(camera_id, image_data, timestamp)
+            else:
+                logger.warning(f"[STILL_RX] Empty image from camera {camera_id}")
+                
+        except Exception as e:
+            logger.error(f"[STILL_RX] Receive error from {ip}: {e}")
+        finally:
+            try:
+                conn.close()
+            except:
+                pass
+    
+    def stop(self):
+        """Stop the receiver thread"""
+        logger.info("[STILL_RX] Stopping receiver...")
+        self.running = False
+
+
+# =============================================================================
 # MAIN NETWORK MANAGER
 # =============================================================================
 
@@ -563,6 +690,7 @@ class NetworkManager(QObject):
     video_started = Signal(str, int)  # ip, camera_id
     video_stopped = Signal(str, int)  # ip, camera_id
     video_frame_received = Signal(str, int, bytes)  # ip, camera_id, frame_data
+    still_image_received = Signal(int, bytes, str)  # camera_id, image_data, timestamp
     command_sent = Signal(str, str, bool)  # ip, command_type, success
     camera_online = Signal(int)  # camera_id
     camera_offline = Signal(int)  # camera_id
@@ -596,10 +724,16 @@ class NetworkManager(QObject):
         self.video_receiver.frame_received.connect(
             lambda ip, cid, data: self.video_frame_received.emit(ip, cid, data))
         
+        # Create still image receiver (TCP for high-res captures)
+        self.still_receiver = StillReceiver()
+        self.still_receiver.still_received.connect(
+            lambda cid, data, ts: self.still_image_received.emit(cid, data, ts))
+        
         # Start threads
         self.worker.start()
         self.heartbeat_monitor.start()
         self.video_receiver.start()
+        self.still_receiver.start()
         
         logger.info(f"[MANAGER] NetworkManager initialized (mock_mode={mock_mode})")
     
@@ -1046,6 +1180,13 @@ class NetworkManager(QObject):
         if self.video_receiver.isRunning():
             logger.warning("[MANAGER] Force terminating video receiver")
             self.video_receiver.terminate()
+        
+        # Stop still receiver
+        self.still_receiver.stop()
+        self.still_receiver.wait(2000)
+        if self.still_receiver.isRunning():
+            logger.warning("[MANAGER] Force terminating still receiver")
+            self.still_receiver.terminate()
         
         # Stop worker
         self.worker.stop()

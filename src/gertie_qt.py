@@ -138,9 +138,14 @@ class MainWindow(QMainWindow):
         self.network_manager = NetworkManager(mock_mode=True)
         self.network_manager.capture_completed.connect(self._on_capture_completed)
         self.network_manager.video_frame_received.connect(self._on_video_frame_received)
+        self.network_manager.still_image_received.connect(self._on_still_image_received)
         
         # Real video frame buffers (camera_id -> latest frame)
         self.real_frames = {}
+        
+        # High-res captures directory
+        self.hires_captures_dir = "hires_captures"
+        os.makedirs(self.hires_captures_dir, exist_ok=True)
         
         # State
         self.frame_count = 0
@@ -277,7 +282,7 @@ class MainWindow(QMainWindow):
         cameras_layout.addLayout(controls)
         
         # Right side - Gallery
-        self.gallery = GalleryPanel(self.captures_dir)
+        self.gallery = GalleryPanel(self.hires_captures_dir)
         self.gallery.setMinimumWidth(300)
         
         # Add to splitter
@@ -411,6 +416,26 @@ class MainWindow(QMainWindow):
             
         except Exception as e:
             print(f"  ⚠️ Frame decode error for camera {camera_id}: {e}")
+    
+    def _on_still_image_received(self, camera_id: int, data: bytes, timestamp: str):
+        """Handle incoming high-resolution still image from real camera"""
+        try:
+            # Save to hires_captures directory
+            filename = f"{self.hires_captures_dir}/rep{camera_id}_{timestamp}.jpg"
+            
+            with open(filename, 'wb') as f:
+                f.write(data)
+            
+            size_kb = len(data) / 1024
+            self.capture_count += 1
+            print(f"  📸 Hi-res saved: {filename} ({size_kb:.1f} KB)")
+            
+            # Refresh gallery to show new image
+            if hasattr(self, 'gallery') and self.gallery.isVisible():
+                self.gallery.refresh_gallery()
+                
+        except Exception as e:
+            print(f"  ⚠️ Still save error for camera {camera_id}: {e}")
     
     def _toggle_gallery(self):
         """Toggle gallery visibility"""
