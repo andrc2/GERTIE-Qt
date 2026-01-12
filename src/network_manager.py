@@ -415,6 +415,95 @@ class HeartbeatMonitor(QThread):
 
 
 # =============================================================================
+# VIDEO RECEIVER
+# =============================================================================
+
+class VideoReceiver(QThread):
+    """Receive video frames from cameras via UDP"""
+    
+    # Signal: ip, camera_id, frame_data (bytes)
+    frame_received = Signal(str, int, bytes)
+    
+    def __init__(self):
+        super().__init__()
+        self.running = True
+        self.mock_mode = True
+        self.socket = None
+        
+        # Frame statistics
+        self.frames_received = {}
+        self.last_frame_time = {}
+        
+        logger.info("[VIDEO_RX] VideoReceiver initialized")
+    
+    def run(self):
+        """Main receive loop"""
+        logger.info("[VIDEO_RX] Receiver thread started")
+        
+        if self.mock_mode:
+            # In mock mode, don't actually listen
+            while self.running:
+                self.msleep(100)
+            return
+        
+        try:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
+            self.socket.settimeout(0.5)
+            self.socket.bind(("0.0.0.0", VIDEO_PORT))
+            
+            logger.info(f"[VIDEO_RX] Listening on port {VIDEO_PORT}")
+            
+            # Get valid slave IPs
+            slave_ips = [config["ip"] for config in SLAVES.values()]
+            
+            while self.running:
+                try:
+                    data, addr = self.socket.recvfrom(65536)
+                    ip = addr[0]
+                    
+                    # Accept frames from configured slaves
+                    if ip in slave_ips or ip in ("127.0.0.1", "localhost"):
+                        camera_id = get_camera_id_from_ip(ip)
+                        
+                        # Track statistics
+                        if ip not in self.frames_received:
+                            self.frames_received[ip] = 0
+                        self.frames_received[ip] += 1
+                        self.last_frame_time[ip] = time.time()
+                        
+                        # Emit frame for processing
+                        self.frame_received.emit(ip, camera_id, data)
+                        
+                except socket.timeout:
+                    continue
+                except Exception as e:
+                    if self.running:
+                        logger.warning(f"[VIDEO_RX] Receive error: {e}")
+                        
+        except Exception as e:
+            logger.error(f"[VIDEO_RX] Setup error: {e}")
+        finally:
+            if self.socket:
+                self.socket.close()
+                
+        logger.info("[VIDEO_RX] Receiver thread stopped")
+    
+    def stop(self):
+        """Stop the receiver thread"""
+        logger.info("[VIDEO_RX] Stopping receiver...")
+        self.running = False
+    
+    def get_stats(self) -> dict:
+        """Get frame reception statistics"""
+        return {
+            'frames_received': dict(self.frames_received),
+            'last_frame_time': dict(self.last_frame_time)
+        }
+
+
+# =============================================================================
 # MAIN NETWORK MANAGER
 # =============================================================================
 
@@ -436,6 +525,7 @@ class NetworkManager(QObject):
     settings_updated = Signal(str, int)  # ip, camera_id
     video_started = Signal(str, int)  # ip, camera_id
     video_stopped = Signal(str, int)  # ip, camera_id
+    video_frame_received = Signal(str, int, bytes)  # ip, camera_id, frame_data
     command_sent = Signal(str, str, bool)  # ip, command_type, success
     camera_online = Signal(int)  # camera_id
     camera_offline = Signal(int)  # camera_id
@@ -463,9 +553,16 @@ class NetworkManager(QObject):
         self.heartbeat_monitor.camera_offline.connect(
             lambda ip, cid: self.camera_offline.emit(cid))
         
+        # Create video receiver
+        self.video_receiver = VideoReceiver()
+        self.video_receiver.mock_mode = mock_mode
+        self.video_receiver.frame_received.connect(
+            lambda ip, cid, data: self.video_frame_received.emit(ip, cid, data))
+        
         # Start threads
         self.worker.start()
         self.heartbeat_monitor.start()
+        self.video_receiver.start()
         
         logger.info(f"[MANAGER] NetworkManager initialized (mock_mode={mock_mode})")
     
@@ -479,6 +576,7 @@ class NetworkManager(QObject):
             self.mock_mode = enabled
             self.worker.mock_mode = enabled
             self.heartbeat_monitor.mock_mode = enabled
+            self.video_receiver.mock_mode = enabled
             
             mode_str = "MOCK" if enabled else "REAL NETWORK"
             logger.info(f"[MANAGER] Mode changed to {mode_str}")
@@ -904,6 +1002,13 @@ class NetworkManager(QObject):
         if self.heartbeat_monitor.isRunning():
             logger.warning("[MANAGER] Force terminating heartbeat monitor")
             self.heartbeat_monitor.terminate()
+        
+        # Stop video receiver
+        self.video_receiver.stop()
+        self.video_receiver.wait(2000)
+        if self.video_receiver.isRunning():
+            logger.warning("[MANAGER] Force terminating video receiver")
+            self.video_receiver.terminate()
         
         # Stop worker
         self.worker.stop()

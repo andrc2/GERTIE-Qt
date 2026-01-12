@@ -136,6 +136,10 @@ class MainWindow(QMainWindow):
         self.camera_system = MockCameraSystem(resolution=(640, 480), fps=30)
         self.network_manager = NetworkManager(mock_mode=True)
         self.network_manager.capture_completed.connect(self._on_capture_completed)
+        self.network_manager.video_frame_received.connect(self._on_video_frame_received)
+        
+        # Real video frame buffers (camera_id -> latest frame)
+        self.real_frames = {}
         
         # State
         self.frame_count = 0
@@ -293,13 +297,32 @@ class MainWindow(QMainWindow):
         if self.paused:
             return
         
-        frames = self.camera_system.generate_all_frames()
-        self.current_frames = frames
-        
-        for widget, frame in zip(self.camera_widgets, frames):
-            qimage = ImageQt(frame)
-            pixmap = QPixmap.fromImage(qimage)
-            widget.update_frame(pixmap)
+        # Check if using real or mock mode
+        if self.network_manager.is_mock_mode():
+            # Use mock frames
+            frames = self.camera_system.generate_all_frames()
+            self.current_frames = frames
+            
+            for widget, frame in zip(self.camera_widgets, frames):
+                qimage = ImageQt(frame)
+                pixmap = QPixmap.fromImage(qimage)
+                widget.update_frame(pixmap)
+        else:
+            # Use real frames from network
+            for i, widget in enumerate(self.camera_widgets):
+                camera_id = i + 1
+                if camera_id in self.real_frames:
+                    frame = self.real_frames[camera_id]
+                    # Convert numpy array to PIL Image to QPixmap
+                    from PIL import Image
+                    pil_image = Image.fromarray(frame)
+                    qimage = ImageQt(pil_image)
+                    pixmap = QPixmap.fromImage(qimage)
+                    widget.update_frame(pixmap)
+                    # Store for capture
+                    if len(self.current_frames) < 8:
+                        self.current_frames = [None] * 8
+                    self.current_frames[i] = pil_image
         
         self.frame_count += 1
         
@@ -354,6 +377,24 @@ class MainWindow(QMainWindow):
     def _on_capture_completed(self, ip: str):
         """Network capture completed"""
         pass
+    
+    def _on_video_frame_received(self, ip: str, camera_id: int, data: bytes):
+        """Handle incoming video frame from real camera"""
+        try:
+            import io
+            from PIL import Image
+            
+            # Decode JPEG frame
+            image = Image.open(io.BytesIO(data))
+            
+            # Convert to numpy array for display
+            frame = np.array(image)
+            
+            # Store in buffer (keyed by camera_id)
+            self.real_frames[camera_id] = frame
+            
+        except Exception as e:
+            pass  # Silently ignore decode errors
     
     def _toggle_gallery(self):
         """Toggle gallery visibility"""
