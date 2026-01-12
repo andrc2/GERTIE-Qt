@@ -484,8 +484,13 @@ class VideoReceiver(QThread):
                             ip = addr[0]
                             
                             # Accept frames from configured slaves
-                            if ip in slave_ips or ip in ("127.0.0.1", "localhost"):
-                                camera_id = get_camera_id_from_ip(ip)
+                            # Also accept from MASTER_IP (192.168.0.200) as camera 8 (local loopback routing)
+                            if ip in slave_ips or ip in ("127.0.0.1", "localhost", MASTER_IP):
+                                # Map MASTER_IP to camera 8 (local camera)
+                                if ip == MASTER_IP:
+                                    camera_id = 8
+                                else:
+                                    camera_id = get_camera_id_from_ip(ip)
                                 
                                 # Track statistics
                                 if ip not in self.frames_received:
