@@ -420,6 +420,8 @@ class MainWindow(QMainWindow):
                 QPushButton:hover { opacity: 0.9; }
             """)
             print("\n🔧 Switched to MOCK MODE (no network traffic)")
+            # Stop streams when going to mock mode
+            self.network_manager.send_stop_all_streams()
         else:
             self.network_mode_btn.setText("📡 REAL NETWORK")
             self.network_mode_btn.setStyleSheet("""
@@ -435,6 +437,10 @@ class MainWindow(QMainWindow):
                 QPushButton:hover { opacity: 0.9; }
             """)
             print("\n📡 Switched to REAL NETWORK MODE (commands sent to Pi cameras)")
+            # Start streams on all cameras
+            self.network_manager.send_start_all_streams()
+            # Clear old frames
+            self.real_frames = {}
     
     def keyPressEvent(self, event):
         """Handle keyboard"""
