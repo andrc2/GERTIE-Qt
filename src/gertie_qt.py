@@ -309,6 +309,13 @@ class MainWindow(QMainWindow):
                 widget.update_frame(pixmap)
         else:
             # Use real frames from network
+            # Log real_frames status periodically
+            if not hasattr(self, '_real_frame_log_count'):
+                self._real_frame_log_count = 0
+            self._real_frame_log_count += 1
+            if self._real_frame_log_count == 1 or self._real_frame_log_count % 100 == 0:
+                print(f"  🎬 Real mode update #{self._real_frame_log_count}: {len(self.real_frames)} cameras have frames: {list(self.real_frames.keys())}")
+            
             for i, widget in enumerate(self.camera_widgets):
                 camera_id = i + 1
                 if camera_id in self.real_frames:
@@ -393,8 +400,16 @@ class MainWindow(QMainWindow):
             # Store in buffer (keyed by camera_id)
             self.real_frames[camera_id] = frame
             
+            # Log first frame per camera
+            if not hasattr(self, '_frame_log_count'):
+                self._frame_log_count = {}
+            if camera_id not in self._frame_log_count:
+                self._frame_log_count[camera_id] = 0
+                print(f"  📹 First decoded frame from camera {camera_id}: {frame.shape}")
+            self._frame_log_count[camera_id] += 1
+            
         except Exception as e:
-            pass  # Silently ignore decode errors
+            print(f"  ⚠️ Frame decode error for camera {camera_id}: {e}")
     
     def _toggle_gallery(self):
         """Toggle gallery visibility"""
