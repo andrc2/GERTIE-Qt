@@ -27,7 +27,7 @@ from PySide6.QtCore import QThread, Signal, QObject, QMutex, QMutexLocker
 # Import config
 from config import (
     SLAVES, MASTER_IP, get_slave_ports, get_camera_id_from_ip,
-    is_local_camera, STILL_PORT, HEARTBEAT_PORT
+    is_local_camera, STILL_PORT, HEARTBEAT_PORT, VIDEO_PORT
 )
 
 # Setup module logging
