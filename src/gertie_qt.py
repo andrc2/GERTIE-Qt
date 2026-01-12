@@ -421,6 +421,29 @@ class MainWindow(QMainWindow):
         
         elif key == Qt.Key.Key_Q:
             self.close()
+        
+        # Keys 1-8: Capture individual cameras
+        elif key >= Qt.Key.Key_1 and key <= Qt.Key.Key_8:
+            camera_id = key - Qt.Key.Key_1 + 1  # Convert to 1-8
+            self._on_capture_single(camera_id)
+    
+    def _on_capture_single(self, camera_id: int):
+        """Capture single camera by ID (1-8)"""
+        from config import SLAVES, get_slave_ports
+        
+        # Map camera_id to slave name and IP
+        slave_names = ["rep1", "rep2", "rep3", "rep4", "rep5", "rep6", "rep7", "rep8"]
+        if camera_id < 1 or camera_id > 8:
+            return
+        
+        slave_name = slave_names[camera_id - 1]
+        if slave_name in SLAVES:
+            ip = SLAVES[slave_name]["ip"]
+            print(f"\n📷 Capturing camera {camera_id} ({slave_name} @ {ip})...")
+            self.network_manager.send_capture_command(ip, camera_id)
+            self.capture_count += 1
+            self._save_mock_capture(camera_id)
+            self.status_bar.showMessage(f"Captured camera {camera_id}", 2000)
     
     def closeEvent(self, event):
         """Cleanup"""
