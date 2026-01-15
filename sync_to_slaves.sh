@@ -17,7 +17,7 @@ REMOTE_SLAVES=(
     "192.168.0.207"  # rep7
 )
 LOCAL_SLAVE="127.0.0.1"  # rep8 (local)
-SOURCE_DIR="/home/andrc1/camera_system_integrated_final"
+SOURCE_DIR="/home/andrc1/camera_system_qt_conversion"
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
 # Colors for terminal output
