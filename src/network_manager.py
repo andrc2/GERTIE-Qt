@@ -92,7 +92,7 @@ class NetworkWorker(QThread):
         super().__init__()
         self.command_queue: List[NetworkCommand] = []
         self.running = True
-        self.mock_mode = True  # Default to mock for MacBook testing
+        self.mock_mode = False  # Production: always use real network
         self.mutex = QMutex()
         
         # Statistics
