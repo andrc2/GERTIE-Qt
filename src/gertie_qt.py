@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """
-GERTIE Qt - Complete Camera System with Gallery
-Phase 3: Still Capture + Gallery Integration + Network Commands
+GERTIE Qt - Production Camera System with Gallery
 
 Features:
-- 8-camera grid display
+- 8-camera grid display with real-time streaming
 - Still capture functionality
 - Gallery panel with auto-refresh
 - Integrated layout with toggle
-- Complete network command support
-- Mock/Real network mode toggle
+- Complete network command support for Pi cameras
 """
 
 import sys
@@ -28,7 +26,6 @@ from PySide6.QtGui import QPixmap
 from PIL.ImageQt import ImageQt
 
 # Import our modules
-from mock_camera import MockCameraSystem
 from network_manager import NetworkManager
 from gallery_panel import GalleryPanel
 from camera_settings_dialog import CameraSettingsDialog
@@ -134,8 +131,7 @@ class MainWindow(QMainWindow):
         self.setGeometry(50, 50, 1600, 900)
         
         # Initialize systems
-        self.camera_system = MockCameraSystem(resolution=(640, 480), fps=30)
-        self.network_manager = NetworkManager(mock_mode=True)
+        self.network_manager = NetworkManager(mock_mode=False)
         self.network_manager.capture_completed.connect(self._on_capture_completed)
         self.network_manager.video_frame_received.connect(self._on_video_frame_received)
         self.network_manager.still_image_received.connect(self._on_still_image_received)
@@ -151,7 +147,7 @@ class MainWindow(QMainWindow):
         self.frame_count = 0
         self.start_time = time.time()
         self.paused = False
-        self.captures_dir = "mock_captures"
+        self.captures_dir = "captures"
         os.makedirs(self.captures_dir, exist_ok=True)
         self.capture_count = 0
         self.current_frames = []
@@ -165,20 +161,16 @@ class MainWindow(QMainWindow):
         self.timer.start(33)
         
         print("="*70)
-        print("GERTIE Qt - Phase 3: Capture + Gallery + Network")
+        print("GERTIE Qt - Production Network Mode")
         print("="*70)
         print("Controls:")
         print("  Space: Pause/Resume video")
         print("  C: Capture all cameras")
         print("  G: Toggle gallery")
-        print("  M: Toggle Mock/Real network mode")
         print("  R: Reset stats")
         print("  Q: Quit")
+        print("  1-8: Capture individual camera")
         print("  ⚙️ button: Per-camera settings")
-        print("")
-        print("Network Mode:")
-        print("  🔧 MOCK MODE: Simulates commands (no Pi required)")
-        print("  📡 REAL NETWORK: Sends UDP to Pi cameras")
         print("="*70)
     
     def _setup_ui(self):
@@ -232,31 +224,6 @@ class MainWindow(QMainWindow):
         
         controls.addStretch()
         
-        # Network mode toggle button
-        self.network_mode_btn = QPushButton("🔧 MOCK MODE")
-        self.network_mode_btn.setCheckable(True)
-        self.network_mode_btn.setChecked(True)  # Start in mock mode
-        self.network_mode_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #a52;
-                color: white;
-                border: none;
-                padding: 8px 15px;
-                border-radius: 5px;
-                font-weight: bold;
-                font-size: 11px;
-            }
-            QPushButton:checked {
-                background-color: #a52;
-            }
-            QPushButton:!checked {
-                background-color: #2a5;
-            }
-            QPushButton:hover { opacity: 0.9; }
-        """)
-        self.network_mode_btn.clicked.connect(self._toggle_network_mode)
-        controls.addWidget(self.network_mode_btn)
-        
         # Toggle gallery button
         self.toggle_gallery_btn = QPushButton("📁 Gallery (G)")
         self.toggle_gallery_btn.setCheckable(True)
@@ -299,43 +266,25 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("Ready")
     
     def _update_frames(self):
-        """Update camera frames"""
+        """Update camera frames from network"""
         if self.paused:
             return
         
-        # Check if using real or mock mode
-        if self.network_manager.is_mock_mode():
-            # Use mock frames
-            frames = self.camera_system.generate_all_frames()
-            self.current_frames = frames
-            
-            for widget, frame in zip(self.camera_widgets, frames):
-                qimage = ImageQt(frame)
+        # Use real frames from network
+        for i, widget in enumerate(self.camera_widgets):
+            camera_id = i + 1
+            if camera_id in self.real_frames:
+                frame = self.real_frames[camera_id]
+                # Convert numpy array to PIL Image to QPixmap
+                from PIL import Image
+                pil_image = Image.fromarray(frame)
+                qimage = ImageQt(pil_image)
                 pixmap = QPixmap.fromImage(qimage)
                 widget.update_frame(pixmap)
-        else:
-            # Use real frames from network
-            # Log real_frames status periodically
-            if not hasattr(self, '_real_frame_log_count'):
-                self._real_frame_log_count = 0
-            self._real_frame_log_count += 1
-            if self._real_frame_log_count == 1 or self._real_frame_log_count % 100 == 0:
-                print(f"  🎬 Real mode update #{self._real_frame_log_count}: {len(self.real_frames)} cameras have frames: {list(self.real_frames.keys())}")
-            
-            for i, widget in enumerate(self.camera_widgets):
-                camera_id = i + 1
-                if camera_id in self.real_frames:
-                    frame = self.real_frames[camera_id]
-                    # Convert numpy array to PIL Image to QPixmap
-                    from PIL import Image
-                    pil_image = Image.fromarray(frame)
-                    qimage = ImageQt(pil_image)
-                    pixmap = QPixmap.fromImage(qimage)
-                    widget.update_frame(pixmap)
-                    # Store for capture
-                    if len(self.current_frames) < 8:
-                        self.current_frames = [None] * 8
-                    self.current_frames[i] = pil_image
+                # Store for capture
+                if len(self.current_frames) < 8:
+                    self.current_frames = [None] * 8
+                self.current_frames[i] = pil_image
         
         self.frame_count += 1
         
@@ -349,7 +298,6 @@ class MainWindow(QMainWindow):
     def _on_camera_capture(self, camera_id: int, ip: str):
         """Handle single camera capture"""
         self.network_manager.send_capture_command(ip, camera_id)
-        self._save_mock_capture(camera_id)
     
     def _on_camera_settings(self, camera_id: int, ip: str):
         """Handle camera settings dialog"""
@@ -370,12 +318,9 @@ class MainWindow(QMainWindow):
         print("\n📷 Capturing all cameras...")
         # Use NetworkManager's batch function for correct IPs
         self.network_manager.send_capture_all()
-        # Save mock captures locally
-        for camera_id in range(1, 9):
-            self._save_mock_capture(camera_id)
     
-    def _save_mock_capture(self, camera_id: int):
-        """Save current frame"""
+    def _save_frame_capture(self, camera_id: int):
+        """Save current frame from buffer"""
         try:
             if camera_id - 1 < len(self.current_frames):
                 frame = self.current_frames[camera_id - 1]
@@ -441,48 +386,6 @@ class MainWindow(QMainWindow):
         """Toggle gallery visibility"""
         self.gallery.setVisible(self.toggle_gallery_btn.isChecked())
     
-    def _toggle_network_mode(self):
-        """Toggle between mock and real network mode"""
-        mock_mode = self.network_mode_btn.isChecked()
-        self.network_manager.set_mock_mode(mock_mode)
-        
-        if mock_mode:
-            self.network_mode_btn.setText("🔧 MOCK MODE")
-            self.network_mode_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #a52;
-                    color: white;
-                    border: none;
-                    padding: 8px 15px;
-                    border-radius: 5px;
-                    font-weight: bold;
-                    font-size: 11px;
-                }
-                QPushButton:hover { opacity: 0.9; }
-            """)
-            print("\n🔧 Switched to MOCK MODE (no network traffic)")
-            # Stop streams when going to mock mode
-            self.network_manager.send_stop_all_streams()
-        else:
-            self.network_mode_btn.setText("📡 REAL NETWORK")
-            self.network_mode_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #2a5;
-                    color: white;
-                    border: none;
-                    padding: 8px 15px;
-                    border-radius: 5px;
-                    font-weight: bold;
-                    font-size: 11px;
-                }
-                QPushButton:hover { opacity: 0.9; }
-            """)
-            print("\n📡 Switched to REAL NETWORK MODE (commands sent to Pi cameras)")
-            # Start streams on all cameras
-            self.network_manager.send_start_all_streams()
-            # Clear old frames
-            self.real_frames = {}
-    
     def keyPressEvent(self, event):
         """Handle keyboard"""
         key = event.key()
@@ -503,9 +406,6 @@ class MainWindow(QMainWindow):
         
         elif key == Qt.Key.Key_G:
             self.toggle_gallery_btn.click()
-        
-        elif key == Qt.Key.Key_M:
-            self.network_mode_btn.click()
         
         elif key == Qt.Key.Key_Q:
             self.close()
@@ -530,7 +430,7 @@ class MainWindow(QMainWindow):
             print(f"\n📷 Capturing camera {camera_id} ({slave_name} @ {ip})...")
             self.network_manager.send_capture_command(ip, camera_id)
             self.capture_count += 1
-            self._save_mock_capture(camera_id)
+            self._save_frame_capture(camera_id)
             self.status_bar.showMessage(f"Captured camera {camera_id}", 2000)
     
     def closeEvent(self, event):
