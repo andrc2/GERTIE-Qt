@@ -291,10 +291,10 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     
     # Find test images
-    images = sorted(glob.glob("mock_captures/*.jpg"))
+    images = sorted(glob.glob("captures/*.jpg"))
     
     if not images:
-        print("✗ No test images found in mock_captures/")
+        print("✗ No test images found in captures/")
         sys.exit(1)
     
     print(f"Found {len(images)} images")
