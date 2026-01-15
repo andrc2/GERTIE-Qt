@@ -44,7 +44,7 @@ LOCAL_CONTROL_PORT = 5011
 LOCAL_VIDEO_PORT = 5012
 LOCAL_STILL_PORT = 6010
 LOCAL_HEARTBEAT_PORT = 5013
-LOCAL_VIDEO_CONTROL_PORT = 5014
+LOCAL_VIDEO_CONTROL_PORT = 5011  # Same as LOCAL_CONTROL_PORT - local_camera_slave handles all commands on one port
 
 # =============================================================================
 # SLAVE DEVICES CONFIGURATION
