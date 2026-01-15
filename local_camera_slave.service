@@ -1,0 +1,16 @@
+[Unit]
+Description=Local Camera Slave Service (rep8)
+After=network.target
+
+[Service]
+Type=simple
+User=andrc1
+WorkingDirectory=/home/andrc1/camera_system_integrated_final
+ExecStart=/usr/bin/python3 local_camera_slave.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
