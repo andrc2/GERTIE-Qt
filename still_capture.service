@@ -1,0 +1,21 @@
+[Unit]
+Description=Still Capture Service (Fixed)
+After=network.target video_stream.service
+Requires=video_stream.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=andrc1
+Group=andrc1
+WorkingDirectory=/home/andrc1/camera_system_integrated_final
+ExecStartPre=/bin/sleep 5
+ExecStart=/usr/bin/python3 /home/andrc1/camera_system_integrated_final/slave/still_capture.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONPATH=/home/andrc1/camera_system_integrated_final
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,18 @@
+[Unit]
+Description=Video Stream Service (Fixed)
+After=network.target
+
+[Service]
+Type=simple
+User=andrc1
+Group=andrc1
+WorkingDirectory=/home/andrc1/camera_system_integrated_final
+ExecStart=/usr/bin/python3 /home/andrc1/camera_system_integrated_final/slave/video_stream.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONPATH=/home/andrc1/camera_system_integrated_final
+
+[Install]
+WantedBy=multi-user.target
