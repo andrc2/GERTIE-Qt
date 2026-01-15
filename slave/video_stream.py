@@ -399,7 +399,7 @@ def start_stream():
         logging.info(f"[VIDEO] ✅ Camera started with MINIMAL controls (matching rep8)")
         
         logging.info(f"[VIDEO] ✅ Camera hardware initialized for {device_name}")
-        time.sleep(2.0)
+        time.sleep(0.5)  # Reduced from 2.0s - camera starts quickly
         
         # Setup UDP socket
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -503,12 +503,12 @@ def restart_stream():
     logging.info(f"[VIDEO] 🔄 Restarting stream for {device_name}...")
     
     stop_stream()
-    time.sleep(3.0)  # Allow complete stop
+    time.sleep(0.5)  # Reduced from 3.0s - stop is fast
     
     logging.info(f"[VIDEO] 🚀 Starting new stream for {device_name}")
     threading.Thread(target=start_stream, daemon=True).start()
     
-    time.sleep(1.0)
+    time.sleep(0.3)  # Reduced from 1.0s
     logging.info(f"[VIDEO] ✅ Stream restarted for {device_name}")
 
 def handle_video_commands():

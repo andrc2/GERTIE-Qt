@@ -256,7 +256,7 @@ def start_local_video_stream():
         picam2.start()
         
         logging.info("✓ Local camera initialized")
-        time.sleep(2.0)
+        time.sleep(0.5)  # Reduced from 2.0s - camera starts quickly
 
         # Create UDP socket
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -375,7 +375,7 @@ def stop_local_video_stream():
     with streaming_lock:
         streaming = False
     
-    time.sleep(1.0)
+    time.sleep(0.2)  # Reduced from 1.0s - stream stops quickly
     logging.info("[LOCAL] ✅ Local video stream stopped")
 
 def capture_local_still():
@@ -410,7 +410,7 @@ def capture_local_still():
         else:
             logging.warning(f"[EVENT-RESULT] stream_stopped_event TIMEOUT after {wait_elapsed:.3f}s - FAILED")
             logging.warning("[LOCAL] ⚠️ Timeout waiting for stream cleanup - proceeding anyway")
-            time.sleep(2.0)  # Fallback safety delay
+            time.sleep(0.5)  # Reduced fallback delay from 2.0s
 
     try:
         # Step 2: Clear capture complete event before starting capture
@@ -454,7 +454,7 @@ def capture_local_still():
         else:
             logging.warning(f"[EVENT-RESULT] capture_complete_event TIMEOUT after {wait_elapsed:.3f}s - FAILED")
             logging.warning("[LOCAL] ⚠️ Timeout waiting for capture cleanup - proceeding with caution")
-            time.sleep(1.0)  # Extra safety delay
+            time.sleep(0.3)  # Reduced safety delay from 1.0s
         
         logging.info("[LOCAL] Starting new streaming thread...")
         # BUGFIX: Don't set streaming=True here - let the thread set its own flag
@@ -484,8 +484,8 @@ def capture_local_image_high_resolution():
         picam2.configure(still_config)
         picam2.start()
         
-        # Allow camera to settle (same as working version)
-        time.sleep(1)
+        # Allow camera to settle for auto-exposure (reduced from 1.0s)
+        time.sleep(0.5)
         
         # Capture image (RGB format from Picamera2)
         logging.info("[LOCAL] Capturing HIGH-RESOLUTION image...")
