@@ -462,15 +462,15 @@ def capture_still():
             video_control_port = ports.get('video_control', None)
             if video_control_port:
                 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as vc_sock:
-                    # Send multiple STOP commands to ensure video stream stops
+                    # Send STOP command to ensure video stream stops
                     vc_sock.sendto(b"STOP_STREAM", ("127.0.0.1", video_control_port))
-                    time.sleep(0.5)
+                    time.sleep(0.1)  # Brief pause, then confirm
                     vc_sock.sendto(b"STOP_STREAM", ("127.0.0.1", video_control_port))
-                    logging.info(f"[SLAVE] Sent MULTIPLE STOP_STREAM commands to port {video_control_port}")
+                    logging.info(f"[SLAVE] Sent STOP_STREAM commands to port {video_control_port}")
                 
-                # EXTENDED wait for video stream to completely stop
-                time.sleep(5.0)  # Increased from 3.0 seconds
-                logging.info("[SLAVE] Extended wait for video stream to COMPLETELY stop")
+                # OPTIMIZED: Camera releases in <200ms, no need for long wait
+                time.sleep(0.3)  # Reduced from 5.0s - camera release is fast
+                logging.info("[SLAVE] Quick wait for video stream to stop (optimized)")
         except Exception as e:
             logging.warning(f"[SLAVE] Unable to send STOP_STREAM before capture: {e}")
 
@@ -493,8 +493,8 @@ def capture_still():
     finally:
         # Resume local video stream after capture with delay
         try:
-            # Wait before restarting video to ensure still capture is complete
-            time.sleep(2.0)
+            # OPTIMIZED: Minimal delay before stream restart
+            time.sleep(0.2)  # Reduced from 2.0s - capture is complete
             
             local_ip = get_real_local_ip()
             ports = get_slave_ports(local_ip)
