@@ -325,18 +325,32 @@ class MainWindow(QMainWindow):
         """Handle capture all - INSTANT preview thumbnails from video frames!"""
         print("\n📷 Capturing all cameras...")
         
+        # DEBUG: Show what's in decoded_frames
+        print(f"  🔍 DEBUG: decoded_frames has {len(self.decoded_frames)} cameras: {list(self.decoded_frames.keys())}")
+        print(f"  🔍 DEBUG: hasattr gallery = {hasattr(self, 'gallery')}")
+        
         # INSTANT: Create preview thumbnails from current video frames
         if hasattr(self, 'gallery'):
+            thumbnails_created = 0
             for camera_id in range(1, 9):
                 if camera_id in self.decoded_frames:
                     # Get current video frame (already decoded!)
                     preview_pixmap = self.decoded_frames[camera_id]
-                    # Scale to thumbnail size
-                    thumb = preview_pixmap.scaled(150, 150,
-                                                  Qt.AspectRatioMode.KeepAspectRatio,
-                                                  Qt.TransformationMode.FastTransformation)
-                    # Add to gallery as preview (will be updated when hi-res arrives)
-                    self.gallery.add_preview_thumbnail(camera_id, thumb)
+                    if preview_pixmap and not preview_pixmap.isNull():
+                        # Scale to thumbnail size
+                        thumb = preview_pixmap.scaled(150, 150,
+                                                      Qt.AspectRatioMode.KeepAspectRatio,
+                                                      Qt.TransformationMode.FastTransformation)
+                        # Add to gallery as preview (will be updated when hi-res arrives)
+                        self.gallery.add_preview_thumbnail(camera_id, thumb)
+                        thumbnails_created += 1
+                    else:
+                        print(f"  ⚠️ Camera {camera_id}: pixmap is null!")
+                else:
+                    print(f"  ⚠️ Camera {camera_id}: not in decoded_frames")
+            print(f"  📸 Created {thumbnails_created} instant preview thumbnails")
+        else:
+            print("  ⚠️ No gallery attached!")
         
         # Send actual capture command (hi-res images will arrive later)
         self.network_manager.send_capture_all()
@@ -369,12 +383,13 @@ class MainWindow(QMainWindow):
             self.real_frames[camera_id] = data  # Keep bytes for saving
             self.frame_dirty.add(camera_id)
         
-        # Log first frame per camera
+        # Log first frame per camera (with decode status)
         if not hasattr(self, '_frame_log_count'):
             self._frame_log_count = {}
         if camera_id not in self._frame_log_count:
             self._frame_log_count[camera_id] = 0
-            print(f"  📹 First frame from camera {camera_id}: {len(data)} bytes")
+            decode_status = "✓ decoded" if camera_id in self.decoded_frames else "✗ FAILED"
+            print(f"  📹 First frame from camera {camera_id}: {len(data)} bytes [{decode_status}]")
         self._frame_log_count[camera_id] += 1
     
     def _on_still_image_received(self, camera_id: int, data: bytes, timestamp: str):

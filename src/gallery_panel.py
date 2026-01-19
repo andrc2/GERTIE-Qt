@@ -396,6 +396,8 @@ class GalleryPanel(QWidget):
         This creates a thumbnail immediately using the current video frame.
         The thumbnail will be linked to the actual hi-res file when it arrives.
         """
+        print(f"    🖼️ add_preview_thumbnail called for camera {camera_id}")
+        
         # Remove any existing pending preview for this camera
         if camera_id in self.pending_previews:
             old_widget = self.pending_previews.pop(camera_id)
@@ -417,6 +419,7 @@ class GalleryPanel(QWidget):
         # Update count
         total = len(self.thumbnails) + len(self.pending_previews)
         self.count_label.setText(f"{total} images")
+        print(f"    ✅ Preview thumbnail added for camera {camera_id} - total now: {total}")
     
     def link_preview_to_file(self, camera_id: int, filepath: str):
         """Link a pending preview thumbnail to the actual hi-res file
