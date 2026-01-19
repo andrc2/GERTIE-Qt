@@ -503,4 +503,11 @@ class GalleryPanel(QWidget):
         """Cleanup on close"""
         self.refresh_timer.stop()
         self.loader.stop()
-        self.loader.wait()
+        # Wait up to 1 second for thread to finish
+        if not self.loader.wait(1000):
+            print("Warning: Thumbnail loader thread did not stop in time")
+    
+    # Backwards compatibility alias
+    def stop_auto_refresh(self):
+        """Alias for cleanup() - backwards compatibility"""
+        self.cleanup()

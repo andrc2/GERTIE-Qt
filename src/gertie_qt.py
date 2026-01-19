@@ -451,7 +451,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Cleanup"""
         self.timer.stop()
-        self.gallery.stop_auto_refresh()
+        self.gallery.cleanup()
         self.network_manager.shutdown()
         
         elapsed = time.time() - self.start_time
