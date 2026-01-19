@@ -390,9 +390,9 @@ class MainWindow(QMainWindow):
             self.capture_count += 1
             print(f"  📸 Hi-res saved: {filename} ({size_kb:.1f} KB)")
             
-            # Link preview thumbnail to actual hi-res file
+            # Link preview thumbnail to actual hi-res file (NO image_data - never load hi-res into GUI memory!)
             if hasattr(self, 'gallery'):
-                self.gallery.link_preview_to_file(camera_id, filename, image_data=data)
+                self.gallery.link_preview_to_file(camera_id, filename)
                 
         except Exception as e:
             print(f"  ⚠️ Still save error for camera {camera_id}: {e}")

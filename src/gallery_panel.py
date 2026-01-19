@@ -357,8 +357,15 @@ class GalleryPanel(QWidget):
         # Update count
         self.count_label.setText(f"{len(self.thumbnails)} images")
     
-    def add_image_immediately(self, filepath: str, image_data: bytes = None):
-        """Add new image INSTANTLY - placeholder appears immediately, thumbnail loads in background"""
+    def add_image_immediately(self, filepath: str):
+        """Add new image with placeholder - thumbnail loads from disk in background
+        
+        Used for:
+        1. Startup: Loading existing files from disk
+        2. Edge case: Hi-res arrives before video frame available
+        
+        For normal captures, use add_preview_thumbnail() + link_preview_to_file()
+        """
         if filepath in self.thumbnails:
             return  # Already have it
         
@@ -380,8 +387,8 @@ class GalleryPanel(QWidget):
         # Update count IMMEDIATELY
         self.count_label.setText(f"{len(self.thumbnails)} images")
         
-        # Queue thumbnail generation - pass image_data to avoid disk read!
-        self.thumb_worker.add_to_queue(filepath, image_data=image_data, priority=True)
+        # Queue thumbnail generation from disk (background worker)
+        self.thumb_worker.add_to_queue(filepath, priority=True)
     
     def add_preview_thumbnail(self, camera_id: int, preview_pixmap):
         """Add INSTANT preview thumbnail from video frame - called when capture triggered
@@ -411,17 +418,21 @@ class GalleryPanel(QWidget):
         total = len(self.thumbnails) + len(self.pending_previews)
         self.count_label.setText(f"{total} images")
     
-    def link_preview_to_file(self, camera_id: int, filepath: str, image_data: bytes = None):
+    def link_preview_to_file(self, camera_id: int, filepath: str):
         """Link a pending preview thumbnail to the actual hi-res file
         
         Called when hi-res image arrives - updates the preview to point to real file.
-        Optionally updates thumbnail with hi-res version in background.
+        
+        ARCHITECTURE: GUI never loads hi-res data into memory!
+        - Video frame thumbnail is already displayed (instant, good enough for preview)
+        - Hi-res stays on disk until user clicks to enlarge
+        - This keeps memory constant regardless of session length
         """
         if camera_id in self.pending_previews:
             # Get the pending widget
             widget = self.pending_previews.pop(camera_id)
             
-            # Update its filepath
+            # Update its filepath (was temporary, now points to real hi-res file)
             widget.filepath = filepath
             
             # Move from pending to regular thumbnails dict
@@ -429,15 +440,15 @@ class GalleryPanel(QWidget):
             self.known_files.add(filepath)
             self.mtime_cache[filepath] = time.time()
             
-            # Optionally queue hi-res thumbnail generation (nicer quality)
-            if image_data:
-                self.thumb_worker.add_to_queue(filepath, image_data=image_data, priority=True)
+            # NO hi-res thumbnail generation - video frame preview is sufficient!
+            # Hi-res loaded on-demand only when user clicks to enlarge
             
             # Enforce limits
             self._enforce_thumbnail_limit()
         else:
-            # No pending preview - create thumbnail normally
-            self.add_image_immediately(filepath, image_data)
+            # No pending preview (edge case: capture before video frame ready)
+            # Create placeholder and let background worker generate thumbnail from disk
+            self.add_image_immediately(filepath)
         
         # Update count
         total = len(self.thumbnails) + len(self.pending_previews)
