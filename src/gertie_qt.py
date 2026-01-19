@@ -40,6 +40,8 @@ class CameraWidget(QWidget):
         super().__init__(parent)
         self.camera_id = camera_id
         self.ip = get_ip_from_camera_id(camera_id)  # Use config for correct IP
+        self._last_size = None  # Cache for resize detection
+        self._current_pixmap = None  # Cache current frame
         
         self._setup_ui()
     
@@ -50,7 +52,7 @@ class CameraWidget(QWidget):
         layout.setSpacing(2)
         self.setLayout(layout)
         
-        # Video display - NO setScaledContents to preserve aspect ratio
+        # Video display - use setScaledContents for efficiency
         self.video_label = QLabel()
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.video_label.setStyleSheet("""
@@ -60,7 +62,8 @@ class CameraWidget(QWidget):
             }
         """)
         self.video_label.setMinimumSize(200, 150)
-        self.video_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.video_label.setScaledContents(True)  # Let Qt handle scaling efficiently
+        self.video_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         layout.addWidget(self.video_label, 1)  # stretch factor
         
         # Controls
@@ -116,16 +119,10 @@ class CameraWidget(QWidget):
         self.settings_requested.emit(self.camera_id, self.ip)
     
     def update_frame(self, pixmap: QPixmap):
-        """Update video frame with proper aspect ratio scaling"""
+        """Update video frame - simple and efficient"""
         if pixmap and not pixmap.isNull():
-            # Scale to fit label while preserving aspect ratio
-            label_size = self.video_label.size()
-            scaled = pixmap.scaled(
-                label_size.width() - 4, label_size.height() - 4,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.FastTransformation
-            )
-            self.video_label.setPixmap(scaled)
+            # Direct setPixmap - Qt's setScaledContents handles scaling efficiently
+            self.video_label.setPixmap(pixmap)
 
 
 class MainWindow(QMainWindow):
