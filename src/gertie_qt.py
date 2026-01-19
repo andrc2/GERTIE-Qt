@@ -322,9 +322,23 @@ class MainWindow(QMainWindow):
         self.network_manager.send_settings(ip, settings)
     
     def _on_capture_all(self):
-        """Handle capture all"""
+        """Handle capture all - INSTANT preview thumbnails from video frames!"""
         print("\n📷 Capturing all cameras...")
-        # Use NetworkManager's batch function for correct IPs
+        
+        # INSTANT: Create preview thumbnails from current video frames
+        if hasattr(self, 'gallery'):
+            for camera_id in range(1, 9):
+                if camera_id in self.decoded_frames:
+                    # Get current video frame (already decoded!)
+                    preview_pixmap = self.decoded_frames[camera_id]
+                    # Scale to thumbnail size
+                    thumb = preview_pixmap.scaled(150, 150,
+                                                  Qt.AspectRatioMode.KeepAspectRatio,
+                                                  Qt.TransformationMode.FastTransformation)
+                    # Add to gallery as preview (will be updated when hi-res arrives)
+                    self.gallery.add_preview_thumbnail(camera_id, thumb)
+        
+        # Send actual capture command (hi-res images will arrive later)
         self.network_manager.send_capture_all()
     
     def _save_frame_capture(self, camera_id: int):
@@ -376,9 +390,9 @@ class MainWindow(QMainWindow):
             self.capture_count += 1
             print(f"  📸 Hi-res saved: {filename} ({size_kb:.1f} KB)")
             
-            # Add to gallery INSTANTLY - pass image bytes to avoid disk read!
+            # Link preview thumbnail to actual hi-res file
             if hasattr(self, 'gallery'):
-                self.gallery.add_image_immediately(filename, image_data=data)
+                self.gallery.link_preview_to_file(camera_id, filename, image_data=data)
                 
         except Exception as e:
             print(f"  ⚠️ Still save error for camera {camera_id}: {e}")

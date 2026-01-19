@@ -199,6 +199,10 @@ class GalleryPanel(QWidget):
         self.thumb_worker.thumbnail_ready.connect(self._on_thumbnail_ready)
         self.thumb_worker.start()
         
+        # Pending preview thumbnails (camera_id -> ThumbnailWidget)
+        # These are instant previews from video frames, waiting for hi-res link
+        self.pending_previews = {}
+        
         # Lightweight polling - just checks for new files, doesn't create thumbnails
         self.refresh_timer = QTimer()
         self.refresh_timer.timeout.connect(self._check_for_new_files)
@@ -379,6 +383,66 @@ class GalleryPanel(QWidget):
         # Queue thumbnail generation - pass image_data to avoid disk read!
         self.thumb_worker.add_to_queue(filepath, image_data=image_data, priority=True)
     
+    def add_preview_thumbnail(self, camera_id: int, preview_pixmap):
+        """Add INSTANT preview thumbnail from video frame - called when capture triggered
+        
+        This creates a thumbnail immediately using the current video frame.
+        The thumbnail will be linked to the actual hi-res file when it arrives.
+        """
+        # Remove any existing pending preview for this camera
+        if camera_id in self.pending_previews:
+            old_widget = self.pending_previews.pop(camera_id)
+            self.thumbnail_layout.removeWidget(old_widget)
+            old_widget.deleteLater()
+        
+        # Create widget with preview pixmap (INSTANT - no loading needed!)
+        # Use a temporary filepath that will be updated when hi-res arrives
+        temp_filepath = f"__pending_camera_{camera_id}__"
+        widget = ThumbnailWidget(temp_filepath, preview_pixmap)
+        widget.clicked.connect(self._on_thumbnail_clicked)
+        
+        # Track as pending (will be linked to real file when hi-res arrives)
+        self.pending_previews[camera_id] = widget
+        
+        # Insert at top of grid
+        self._insert_at_top_fast(widget)
+        
+        # Update count
+        total = len(self.thumbnails) + len(self.pending_previews)
+        self.count_label.setText(f"{total} images")
+    
+    def link_preview_to_file(self, camera_id: int, filepath: str, image_data: bytes = None):
+        """Link a pending preview thumbnail to the actual hi-res file
+        
+        Called when hi-res image arrives - updates the preview to point to real file.
+        Optionally updates thumbnail with hi-res version in background.
+        """
+        if camera_id in self.pending_previews:
+            # Get the pending widget
+            widget = self.pending_previews.pop(camera_id)
+            
+            # Update its filepath
+            widget.filepath = filepath
+            
+            # Move from pending to regular thumbnails dict
+            self.thumbnails[filepath] = widget
+            self.known_files.add(filepath)
+            self.mtime_cache[filepath] = time.time()
+            
+            # Optionally queue hi-res thumbnail generation (nicer quality)
+            if image_data:
+                self.thumb_worker.add_to_queue(filepath, image_data=image_data, priority=True)
+            
+            # Enforce limits
+            self._enforce_thumbnail_limit()
+        else:
+            # No pending preview - create thumbnail normally
+            self.add_image_immediately(filepath, image_data)
+        
+        # Update count
+        total = len(self.thumbnails) + len(self.pending_previews)
+        self.count_label.setText(f"{total} images")
+    
     def _insert_at_top_fast(self, new_widget):
         """Insert widget at top - O(1) operation using layout index"""
         # Simply insert at position 0 - Qt handles the rest
@@ -446,6 +510,11 @@ class GalleryPanel(QWidget):
         
     def _on_thumbnail_clicked(self, filepath: str):
         """Handle thumbnail click - open full-size viewer"""
+        # Don't open viewer for pending previews (hi-res not arrived yet)
+        if filepath.startswith("__pending_"):
+            print(f"📷 Preview clicked - hi-res image still loading...")
+            return
+        
         print(f"📷 Opening viewer: {filepath}")
         
         # Get all image files for navigation - use cached mtimes
