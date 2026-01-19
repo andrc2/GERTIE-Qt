@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-Gallery Panel for GERTIE Qt - OPTIMIZED VERSION
-Non-blocking thumbnail generation using background thread
+Gallery Panel for GERTIE Qt - TRUE VIRTUAL SCROLLING
+Only visible thumbnails exist as widgets - massive performance gain
 
-Features:
-- Background thread for thumbnail creation (no UI blocking)
-- Immediate add for new captures via signal
-- Cached thumbnails in memory
-- Minimal filesystem polling
+Architecture:
+- DATA: List of all image paths (can be 1000s)
+- WIDGETS: Only ~10 recycled widgets for visible area
+- On scroll: Update widget contents, don't create/destroy
 """
 
 import os
@@ -15,204 +14,336 @@ import time
 from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
-    QLabel, QPushButton, QGridLayout, QFrame
+    QLabel, QPushButton, QFrame, QSizePolicy, QScrollBar
 )
-from PySide6.QtCore import Qt, Signal, QTimer, QThread, QMutex, QMutexLocker
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt, Signal, QTimer, QThread, QMutex, QMutexLocker, QSize
+from PySide6.QtGui import QPixmap, QPainter, QColor, QFont
 from image_viewer import ImageViewer
 
 
-class ThumbnailWorker(QThread):
-    """Background worker for FAST thumbnail generation"""
+# =============================================================================
+# THUMBNAIL CACHE (Shared cache for pixmaps)
+# =============================================================================
+
+class ThumbnailCache:
+    """Thread-safe cache for thumbnail pixmaps"""
     
-    thumbnail_ready = Signal(str, QPixmap)  # filepath, pixmap
+    def __init__(self, max_size=100):
+        self.cache = {}  # filepath -> QPixmap
+        self.max_size = max_size
+        self.access_order = []  # LRU tracking
+        self.mutex = QMutex()
     
-    def __init__(self):
+    def get(self, filepath):
+        with QMutexLocker(self.mutex):
+            if filepath in self.cache:
+                # Move to end (most recently used)
+                if filepath in self.access_order:
+                    self.access_order.remove(filepath)
+                self.access_order.append(filepath)
+                return self.cache[filepath]
+        return None
+    
+    def put(self, filepath, pixmap):
+        with QMutexLocker(self.mutex):
+            if filepath not in self.cache:
+                # Evict oldest if at capacity
+                while len(self.cache) >= self.max_size and self.access_order:
+                    oldest = self.access_order.pop(0)
+                    self.cache.pop(oldest, None)
+            
+            self.cache[filepath] = pixmap
+            if filepath in self.access_order:
+                self.access_order.remove(filepath)
+            self.access_order.append(filepath)
+    
+    def has(self, filepath):
+        with QMutexLocker(self.mutex):
+            return filepath in self.cache
+
+
+# =============================================================================
+# THUMBNAIL LOADER (Background thread)
+# =============================================================================
+
+class ThumbnailLoader(QThread):
+    """Background loader for thumbnails"""
+    
+    loaded = Signal(str, QPixmap)  # filepath, pixmap
+    
+    THUMB_WIDTH = 140
+    THUMB_HEIGHT = 90
+    
+    def __init__(self, cache: ThumbnailCache):
         super().__init__()
-        self.priority_queue = []  # NEW captures: (filepath, bytes) - process first!
-        self.queue = []  # Existing files: filepath only - process after
+        self.cache = cache
+        self.queue = []
         self.mutex = QMutex()
         self.running = True
-        self._cache = {}  # filepath -> QPixmap cache
     
-    def add_to_queue(self, filepath: str, image_data: bytes = None, priority: bool = True):
-        """Add file to thumbnail generation queue
+    def request(self, filepath: str, priority: bool = False):
+        """Request thumbnail load"""
+        if self.cache.has(filepath):
+            return  # Already cached
         
-        Args:
-            filepath: Path to the image file
-            image_data: Raw JPEG bytes (if available, avoids disk read!)
-            priority: True for new captures, False for existing files
-        """
         with QMutexLocker(self.mutex):
-            if filepath not in self._cache:
+            if filepath not in self.queue:
                 if priority:
-                    # Check not already queued
-                    if not any(item[0] == filepath for item in self.priority_queue):
-                        self.priority_queue.append((filepath, image_data))
-                elif filepath not in self.queue:
+                    self.queue.insert(0, filepath)
+                else:
                     self.queue.append(filepath)
     
-    def get_cached(self, filepath: str):
-        """Get cached thumbnail if available"""
-        with QMutexLocker(self.mutex):
-            return self._cache.get(filepath)
-    
     def run(self):
-        """Process thumbnail queue in background - PRIORITY QUEUE FIRST"""
         while self.running:
-            item = None
             filepath = None
-            image_data = None
-            
             with QMutexLocker(self.mutex):
-                # Priority queue first (new captures with bytes)
-                if self.priority_queue:
-                    item = self.priority_queue.pop(0)
-                    filepath, image_data = item
-                elif self.queue:
+                if self.queue:
                     filepath = self.queue.pop(0)
-                    image_data = None
             
-            if filepath:
-                pixmap = self._create_thumbnail_fast(filepath, image_data)
+            if filepath and not self.cache.has(filepath):
+                pixmap = self._load(filepath)
                 if pixmap:
-                    with QMutexLocker(self.mutex):
-                        self._cache[filepath] = pixmap
-                    self.thumbnail_ready.emit(filepath, pixmap)
+                    self.cache.put(filepath, pixmap)
+                    self.loaded.emit(filepath, pixmap)
             else:
-                self.msleep(20)  # Short sleep when queue empty
+                self.msleep(30)
     
-    def _create_thumbnail_fast(self, filepath: str, image_data: bytes = None) -> QPixmap:
-        """Create thumbnail FAST - use provided bytes if available, else read from disk"""
+    def _load(self, filepath: str) -> QPixmap:
         try:
-            # Use provided bytes (FAST!) or read from disk (slower)
-            if image_data is None:
-                with open(filepath, 'rb') as f:
-                    image_data = f.read()
-            
-            # Qt native JPEG decode + fast scale
-            pixmap = QPixmap()
-            if pixmap.loadFromData(image_data):
-                return pixmap.scaled(150, 150, 
+            pixmap = QPixmap(filepath)
+            if not pixmap.isNull():
+                return pixmap.scaled(self.THUMB_WIDTH, self.THUMB_HEIGHT,
                                     Qt.AspectRatioMode.KeepAspectRatio,
                                     Qt.TransformationMode.FastTransformation)
-            return None
-            
         except Exception as e:
-            print(f"Thumbnail error for {filepath}: {e}")
-            return None
+            pass
+        return None
     
     def stop(self):
-        """Stop the worker thread"""
         self.running = False
-    
-    def trim_cache(self, max_size: int):
-        """Trim cache to prevent unbounded memory growth"""
-        with QMutexLocker(self.mutex):
-            if len(self._cache) > max_size:
-                # Remove oldest entries (FIFO approximation)
-                keys_to_remove = list(self._cache.keys())[:-max_size]
-                for key in keys_to_remove:
-                    del self._cache[key]
 
 
-class ThumbnailWidget(QFrame):
-    """Widget displaying a single thumbnail"""
+# =============================================================================
+# VIRTUAL LIST WIDGET (The magic - only renders visible items)
+# =============================================================================
+
+class VirtualThumbnailList(QWidget):
+    """Virtual scrolling list - only visible thumbnails consume resources"""
     
-    clicked = Signal(str)  # filepath
+    item_clicked = Signal(str)  # filepath
     
-    def __init__(self, filepath: str, pixmap: QPixmap = None, parent=None):
+    ITEM_HEIGHT = 75  # Height of each row
+    VISIBLE_BUFFER = 2  # Extra items above/below visible area
+    
+    def __init__(self, cache: ThumbnailCache, parent=None):
         super().__init__(parent)
-        self.filepath = filepath
-        self._setup_ui()
-        if pixmap:
-            self.set_pixmap(pixmap)
+        self.cache = cache
         
-    def _setup_ui(self):
-        """Setup the widget UI"""
-        self.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Raised)
-        self.setLineWidth(2)
-        self.setStyleSheet("""
-            ThumbnailWidget {
-                background-color: #222;
-                border: 2px solid #444;
-                border-radius: 5px;
-            }
-            ThumbnailWidget:hover {
-                border-color: #66f;
-            }
-        """)
+        # DATA: All items (filepath, preview_pixmap or None)
+        self.items = []  # [(filepath, preview_pixmap), ...]
         
-        layout = QVBoxLayout()
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(3)
-        self.setLayout(layout)
+        # Scroll state
+        self.scroll_offset = 0
+        self.visible_height = 600
         
-        # Thumbnail image
-        self.image_label = QLabel()
-        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_label.setFixedSize(150, 150)
-        self.image_label.setScaledContents(True)
-        self.image_label.setStyleSheet("background-color: #000; border: 1px solid #666;")
-        self.image_label.setText("Loading...")
-        layout.addWidget(self.image_label)
+        # Preview pixmaps for pending items
+        self.preview_pixmaps = {}  # camera_id -> pixmap
         
-        # Filename label
-        filename = Path(self.filepath).name
-        self.name_label = QLabel(filename)
-        self.name_label.setStyleSheet("color: white; font-size: 10px;")
-        self.name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.name_label.setWordWrap(True)
-        layout.addWidget(self.name_label)
-        
-        # Make clickable
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumWidth(180)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
     
-    def set_pixmap(self, pixmap: QPixmap):
-        """Set the thumbnail pixmap"""
-        self.image_label.setPixmap(pixmap)
-        self.image_label.setText("")
+    def set_scroll(self, offset: int, visible_height: int):
+        """Update scroll position"""
+        self.scroll_offset = offset
+        self.visible_height = visible_height
+        self.update()  # Trigger repaint
+    
+    def add_item(self, filepath: str, preview_pixmap: QPixmap = None):
+        """Add item at top of list"""
+        # Remove if exists
+        self.items = [(fp, px) for fp, px in self.items if fp != filepath]
+        # Insert at top
+        self.items.insert(0, (filepath, preview_pixmap))
+        self._update_size()
+        self.update()
+    
+    def update_item(self, old_filepath: str, new_filepath: str):
+        """Update item filepath (when hi-res arrives)"""
+        for i, (fp, px) in enumerate(self.items):
+            if fp == old_filepath:
+                self.items[i] = (new_filepath, px)
+                break
+        self.update()
+    
+    def remove_item(self, filepath: str):
+        """Remove item"""
+        self.items = [(fp, px) for fp, px in self.items if fp != filepath]
+        self._update_size()
+        self.update()
+    
+    def _update_size(self):
+        """Update widget size based on item count"""
+        total_height = len(self.items) * self.ITEM_HEIGHT
+        self.setMinimumHeight(total_height)
+        self.setMaximumHeight(total_height)
+    
+    def get_visible_range(self):
+        """Get indices of visible items"""
+        first = max(0, self.scroll_offset // self.ITEM_HEIGHT - self.VISIBLE_BUFFER)
+        last = min(len(self.items), 
+                   (self.scroll_offset + self.visible_height) // self.ITEM_HEIGHT + self.VISIBLE_BUFFER + 1)
+        return first, last
+    
+    def paintEvent(self, event):
+        """Paint only visible items - THE PERFORMANCE SECRET"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
+        first, last = self.get_visible_range()
+        
+        for i in range(first, last):
+            if i >= len(self.items):
+                break
+            
+            filepath, preview_pixmap = self.items[i]
+            y = i * self.ITEM_HEIGHT
+            
+            self._paint_item(painter, 0, y, self.width(), self.ITEM_HEIGHT, 
+                           filepath, preview_pixmap, i)
+        
+        painter.end()
+    
+    def _paint_item(self, painter, x, y, w, h, filepath, preview_pixmap, index):
+        """Paint a single item"""
+        # Background
+        bg_color = QColor("#2a2a2a") if index % 2 == 0 else QColor("#252525")
+        painter.fillRect(x, y, w, h, bg_color)
+        
+        # Border
+        painter.setPen(QColor("#444"))
+        painter.drawRect(x + 2, y + 2, w - 4, h - 4)
+        
+        # Thumbnail area
+        thumb_x = x + 5
+        thumb_y = y + 5
+        thumb_w = 100
+        thumb_h = h - 10
+        
+        # Get pixmap (prefer cache, then preview, then placeholder)
+        pixmap = self.cache.get(filepath)
+        if pixmap is None and preview_pixmap:
+            pixmap = preview_pixmap
+        
+        if pixmap and not pixmap.isNull():
+            # Scale to fit
+            scaled = pixmap.scaled(thumb_w, thumb_h,
+                                  Qt.AspectRatioMode.KeepAspectRatio,
+                                  Qt.TransformationMode.FastTransformation)
+            # Center in thumbnail area
+            px = thumb_x + (thumb_w - scaled.width()) // 2
+            py = thumb_y + (thumb_h - scaled.height()) // 2
+            painter.drawPixmap(px, py, scaled)
+        else:
+            # Placeholder
+            painter.fillRect(thumb_x, thumb_y, thumb_w, thumb_h, QColor("#1a1a1a"))
+            painter.setPen(QColor("#666"))
+            painter.drawText(thumb_x, thumb_y, thumb_w, thumb_h,
+                           Qt.AlignmentFlag.AlignCenter, "⏳")
+        
+        # Text info
+        text_x = thumb_x + thumb_w + 10
+        text_y = y + 5
+        text_w = w - text_x - 5
+        
+        painter.setPen(QColor("#ddd"))
+        painter.setFont(QFont("", 10, QFont.Weight.Bold))
+        
+        # Filename
+        if filepath.startswith("__pending"):
+            name = "📷 Capturing..."
+            camera = self._extract_camera(filepath)
+        else:
+            name = Path(filepath).name
+            camera = self._extract_camera(filepath)
+        
+        # Truncate long names
+        if len(name) > 25:
+            name = name[:22] + "..."
+        
+        painter.drawText(text_x, text_y + 15, name)
+        
+        painter.setPen(QColor("#888"))
+        painter.setFont(QFont("", 9))
+        painter.drawText(text_x, text_y + 35, camera)
+    
+    def _extract_camera(self, filepath):
+        """Extract camera info from filepath"""
+        name = Path(filepath).name
+        if "__pending_camera_" in filepath:
+            try:
+                cam = filepath.split("__pending_camera_")[1].replace("__", "")
+                return f"Camera {cam} (preview)"
+            except:
+                pass
+        if name.startswith("rep") and "_" in name:
+            try:
+                cam = name.split("_")[0].replace("rep", "")
+                return f"Camera {cam}"
+            except:
+                pass
+        return ""
+    
     def mousePressEvent(self, event):
-        """Handle click"""
+        """Handle click - determine which item was clicked"""
         if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit(self.filepath)
+            # Map click to item index
+            click_y = event.pos().y()
+            index = click_y // self.ITEM_HEIGHT
+            
+            if 0 <= index < len(self.items):
+                filepath, _ = self.items[index]
+                self.item_clicked.emit(filepath)
+    
+    def item_count(self):
+        return len(self.items)
+    
+    def get_all_filepaths(self):
+        """Get list of all filepaths (for viewer navigation)"""
+        return [fp for fp, _ in self.items if not fp.startswith("__pending")]
 
+
+# =============================================================================
+# GALLERY PANEL (Main widget)
+# =============================================================================
 
 class GalleryPanel(QWidget):
-    """Panel displaying gallery of captured images - OPTIMIZED FOR LONG SESSIONS"""
+    """Gallery panel with virtual scrolling - only visible items use resources"""
     
-    # Limit displayed thumbnails to prevent slowdown
-    MAX_VISIBLE_THUMBNAILS = 100
+    MAX_ITEMS = 500  # Maximum items to track
     
     def __init__(self, captures_dir: str, parent=None):
         super().__init__(parent)
         self.captures_dir = captures_dir
-        self.thumbnails = {}  # filepath -> ThumbnailWidget (VISIBLE only)
-        self.known_files = set()  # Track known files to detect new ones
-        self.mtime_cache = {}  # filepath -> mtime (limited size)
-        self._pending_insert = []  # Batch inserts for efficiency
+        self.known_files = set()
+        self.pending_previews = {}  # camera_id -> temp_filepath
+        
+        # Shared cache and loader
+        self.cache = ThumbnailCache(max_size=100)
+        self.loader = ThumbnailLoader(self.cache)
+        self.loader.loaded.connect(self._on_thumbnail_loaded)
+        self.loader.start()
+        
         self._setup_ui()
         
-        # Background thumbnail worker
-        self.thumb_worker = ThumbnailWorker()
-        self.thumb_worker.thumbnail_ready.connect(self._on_thumbnail_ready)
-        self.thumb_worker.start()
-        
-        # Pending preview thumbnails (camera_id -> ThumbnailWidget)
-        # These are instant previews from video frames, waiting for hi-res link
-        self.pending_previews = {}
-        
-        # Lightweight polling - just checks for new files, doesn't create thumbnails
+        # Periodic check for new files
         self.refresh_timer = QTimer()
         self.refresh_timer.timeout.connect(self._check_for_new_files)
-        self.refresh_timer.start(1000)  # Check every 1000ms
+        self.refresh_timer.start(2000)
         
         # Initial load
-        self._check_for_new_files()
-        
+        QTimer.singleShot(100, self._check_for_new_files)
+    
     def _setup_ui(self):
-        """Setup the panel UI"""
         layout = QVBoxLayout()
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(5)
@@ -222,380 +353,150 @@ class GalleryPanel(QWidget):
         header = QHBoxLayout()
         
         title = QLabel("📷 Gallery")
-        title.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
+        title.setStyleSheet("color: white; font-size: 14px; font-weight: bold;")
         header.addWidget(title)
         
         header.addStretch()
         
-        # Image count
         self.count_label = QLabel("0 images")
-        self.count_label.setStyleSheet("color: #aaa; font-size: 12px;")
+        self.count_label.setStyleSheet("color: #aaa; font-size: 11px;")
         header.addWidget(self.count_label)
-        
-        # Refresh button
-        refresh_btn = QPushButton("🔄")
-        refresh_btn.setFixedSize(30, 30)
-        refresh_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #444;
-                color: white;
-                border: none;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #555;
-            }
-        """)
-        refresh_btn.clicked.connect(self.refresh_gallery)
-        header.addWidget(refresh_btn)
         
         layout.addLayout(header)
         
-        # Scroll area for thumbnails
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("""
-            QScrollArea {
-                border: none;
-                background-color: #1a1a1a;
-            }
+        # Scroll area with virtual list
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setStyleSheet("""
+            QScrollArea { border: none; background-color: #1a1a1a; }
+            QScrollBar:vertical { width: 10px; background: #2a2a2a; }
+            QScrollBar::handle:vertical { background: #555; border-radius: 5px; min-height: 30px; }
+            QScrollBar::handle:vertical:hover { background: #777; }
         """)
         
-        # Container for thumbnails
-        self.thumbnail_container = QWidget()
-        self.thumbnail_layout = QGridLayout()
-        self.thumbnail_layout.setSpacing(10)
-        self.thumbnail_container.setLayout(self.thumbnail_layout)
+        # Virtual list
+        self.virtual_list = VirtualThumbnailList(self.cache)
+        self.virtual_list.item_clicked.connect(self._on_item_clicked)
         
-        scroll.setWidget(self.thumbnail_container)
-        layout.addWidget(scroll)
+        self.scroll_area.setWidget(self.virtual_list)
+        self.scroll_area.verticalScrollBar().valueChanged.connect(self._on_scroll)
+        
+        layout.addWidget(self.scroll_area)
+    
+    def _on_scroll(self, value):
+        """Update virtual list with scroll position"""
+        visible_height = self.scroll_area.viewport().height()
+        self.virtual_list.set_scroll(value, visible_height)
+        
+        # Request thumbnails for visible items
+        first, last = self.virtual_list.get_visible_range()
+        for i in range(first, min(last, len(self.virtual_list.items))):
+            filepath, _ = self.virtual_list.items[i]
+            if not filepath.startswith("__pending"):
+                self.loader.request(filepath)
     
     def _check_for_new_files(self):
-        """Lightweight check for new files - doesn't block UI"""
+        """Check for new files on disk"""
         if not os.path.exists(self.captures_dir):
             return
         
         try:
-            # Quick directory listing (no stat calls yet)
             current_files = set(str(f) for f in Path(self.captures_dir).glob("*.jpg"))
-            
-            # Find new files
             new_files = current_files - self.known_files
-            removed_files = self.known_files - current_files
             
-            # Handle removed files
-            for filepath in removed_files:
-                if filepath in self.thumbnails:
-                    widget = self.thumbnails.pop(filepath)
-                    widget.deleteLater()
-                self.mtime_cache.pop(filepath, None)
-            
-            # Queue new files for thumbnail generation (LOW priority - let new captures go first)
-            for filepath in new_files:
-                # Cache mtime when first seen (avoid repeated stat calls)
-                try:
-                    self.mtime_cache[filepath] = os.path.getmtime(filepath)
-                except:
-                    self.mtime_cache[filepath] = 0
-                self._add_placeholder(filepath)
-                self.thumb_worker.add_to_queue(filepath, priority=False)  # Low priority
+            # Sort by mtime (newest first) and add
+            for filepath in sorted(new_files, key=lambda f: os.path.getmtime(f), reverse=True):
+                self.virtual_list.add_item(filepath)
+                self.loader.request(filepath, priority=False)
             
             self.known_files = current_files
+            self._update_count()
             
-            # Update layout if changes
-            if new_files or removed_files:
-                self._update_layout()
-                
+            # Enforce limit
+            while self.virtual_list.item_count() > self.MAX_ITEMS:
+                if self.virtual_list.items:
+                    old_fp, _ = self.virtual_list.items[-1]
+                    self.virtual_list.remove_item(old_fp)
+                    self.known_files.discard(old_fp)
+            
         except Exception as e:
-            print(f"Gallery check error: {e}")
+            print(f"Gallery scan error: {e}")
     
-    def _add_placeholder(self, filepath: str):
-        """Add placeholder widget for new file (thumbnail loads in background)"""
-        if filepath not in self.thumbnails:
-            # Check if we have a cached thumbnail
-            cached = self.thumb_worker.get_cached(filepath)
-            widget = ThumbnailWidget(filepath, cached)
-            widget.clicked.connect(self._on_thumbnail_clicked)
-            self.thumbnails[filepath] = widget
+    def _on_thumbnail_loaded(self, filepath: str, pixmap: QPixmap):
+        """Thumbnail loaded from disk - trigger repaint"""
+        self.virtual_list.update()
     
-    def _on_thumbnail_ready(self, filepath: str, pixmap: QPixmap):
-        """Called when background worker finishes thumbnail"""
-        if filepath in self.thumbnails:
-            self.thumbnails[filepath].set_pixmap(pixmap)
-    
-    def _update_layout(self):
-        """Update grid layout with current thumbnails - OPTIMIZED with limit"""
-        # Clear layout
-        while self.thumbnail_layout.count():
-            item = self.thumbnail_layout.takeAt(0)
-            # Don't delete widgets, just remove from layout
-        
-        # Sort by cached modification time (newest first)
-        sorted_files = sorted(
-            self.thumbnails.keys(),
-            key=lambda f: self.mtime_cache.get(f, 0),
-            reverse=True
-        )
-        
-        # Limit to MAX_VISIBLE_THUMBNAILS
-        visible_files = sorted_files[:self.MAX_VISIBLE_THUMBNAILS]
-        
-        # Remove excess from thumbnails dict
-        for filepath in sorted_files[self.MAX_VISIBLE_THUMBNAILS:]:
-            widget = self.thumbnails.pop(filepath, None)
-            if widget:
-                widget.deleteLater()
-            self.mtime_cache.pop(filepath, None)
-        
-        # Add to grid (4 per row)
-        cols = 4
-        for i, filepath in enumerate(visible_files):
-            row = i // cols
-            col = i % cols
-            self.thumbnail_layout.addWidget(self.thumbnails[filepath], row, col)
-        
-        # Update count
-        self.count_label.setText(f"{len(self.thumbnails)} images")
-    
-    def add_image_immediately(self, filepath: str):
-        """Add new image with placeholder - thumbnail loads from disk in background
-        
-        Used for:
-        1. Startup: Loading existing files from disk
-        2. Edge case: Hi-res arrives before video frame available
-        
-        For normal captures, use add_preview_thumbnail() + link_preview_to_file()
-        """
-        if filepath in self.thumbnails:
-            return  # Already have it
-        
-        # Cache mtime
-        self.mtime_cache[filepath] = time.time()
-        
-        # Create widget with NO pixmap (shows "Loading..." placeholder - INSTANT!)
-        widget = ThumbnailWidget(filepath, None)
-        widget.clicked.connect(self._on_thumbnail_clicked)
-        self.thumbnails[filepath] = widget
-        self.known_files.add(filepath)
-        
-        # Insert at position 0,0 and shift others (FAST: only moves pointers)
-        self._insert_at_top_fast(widget)
-        
-        # Enforce limit - remove oldest if over limit
-        self._enforce_thumbnail_limit()
-        
-        # Update count IMMEDIATELY
-        self.count_label.setText(f"{len(self.thumbnails)} images")
-        
-        # Queue thumbnail generation from disk (background worker)
-        self.thumb_worker.add_to_queue(filepath, priority=True)
-    
-    def add_preview_thumbnail(self, camera_id: int, preview_pixmap):
-        """Add INSTANT preview thumbnail from video frame - called when capture triggered
-        
-        This creates a thumbnail immediately using the current video frame.
-        The thumbnail will be linked to the actual hi-res file when it arrives.
-        """
-        print(f"    🖼️ add_preview_thumbnail called for camera {camera_id}")
-        
-        # Remove any existing pending preview for this camera
-        if camera_id in self.pending_previews:
-            old_widget = self.pending_previews.pop(camera_id)
-            self.thumbnail_layout.removeWidget(old_widget)
-            old_widget.deleteLater()
-        
-        # Create widget with preview pixmap (INSTANT - no loading needed!)
-        # Use a temporary filepath that will be updated when hi-res arrives
-        temp_filepath = f"__pending_camera_{camera_id}__"
-        widget = ThumbnailWidget(temp_filepath, preview_pixmap)
-        widget.clicked.connect(self._on_thumbnail_clicked)
-        
-        # Track as pending (will be linked to real file when hi-res arrives)
-        self.pending_previews[camera_id] = widget
-        
-        # Insert at top of grid
-        self._insert_at_top_fast(widget)
-        
-        # Update count
-        total = len(self.thumbnails) + len(self.pending_previews)
-        self.count_label.setText(f"{total} images")
-        print(f"    ✅ Preview thumbnail added for camera {camera_id} - total now: {total}")
-    
-    def link_preview_to_file(self, camera_id: int, filepath: str):
-        """Link a pending preview thumbnail to the actual hi-res file
-        
-        Called when hi-res image arrives - updates the preview to point to real file.
-        
-        ARCHITECTURE: GUI never loads hi-res data into memory!
-        - Video frame thumbnail is already displayed (instant, good enough for preview)
-        - Hi-res stays on disk until user clicks to enlarge
-        - This keeps memory constant regardless of session length
-        """
-        if camera_id in self.pending_previews:
-            # Get the pending widget
-            widget = self.pending_previews.pop(camera_id)
-            
-            # Update its filepath (was temporary, now points to real hi-res file)
-            widget.filepath = filepath
-            
-            # Move from pending to regular thumbnails dict
-            self.thumbnails[filepath] = widget
-            self.known_files.add(filepath)
-            self.mtime_cache[filepath] = time.time()
-            
-            # NO hi-res thumbnail generation - video frame preview is sufficient!
-            # Hi-res loaded on-demand only when user clicks to enlarge
-            
-            # Enforce limits
-            self._enforce_thumbnail_limit()
-        else:
-            # No pending preview (edge case: capture before video frame ready)
-            # Create placeholder and let background worker generate thumbnail from disk
-            self.add_image_immediately(filepath)
-        
-        # Update count
-        total = len(self.thumbnails) + len(self.pending_previews)
-        self.count_label.setText(f"{total} images")
-    
-    def _insert_at_top_fast(self, new_widget):
-        """Insert widget at top - O(1) operation using layout index"""
-        # Simply insert at position 0 - Qt handles the rest
-        self.thumbnail_layout.addWidget(new_widget, 0, 0)
-        
-        # Rebuild layout only if we have more than a few items
-        # This is still O(n) but we limit n to MAX_VISIBLE_THUMBNAILS
-        if self.thumbnail_layout.count() > 4:
-            self._rebuild_grid_layout()
-    
-    def _rebuild_grid_layout(self):
-        """Rebuild grid layout efficiently"""
-        # Collect widgets in current order (newest first based on mtime)
-        widgets = []
-        while self.thumbnail_layout.count():
-            item = self.thumbnail_layout.takeAt(0)
-            if item.widget():
-                widgets.append(item.widget())
-        
-        # Sort by mtime (newest first)
-        widgets.sort(key=lambda w: self.mtime_cache.get(w.filepath, 0), reverse=True)
-        
-        # Re-add to grid (4 columns)
-        cols = 4
-        for i, w in enumerate(widgets):
-            row = i // cols
-            col = i % cols
-            self.thumbnail_layout.addWidget(w, row, col)
-    
-    def _enforce_thumbnail_limit(self):
-        """Remove oldest thumbnails if over limit - prevents memory growth"""
-        if len(self.thumbnails) <= self.MAX_VISIBLE_THUMBNAILS:
-            return
-        
-        # Find oldest thumbnails by mtime
-        sorted_paths = sorted(
-            self.thumbnails.keys(),
-            key=lambda p: self.mtime_cache.get(p, 0)
-        )
-        
-        # Remove oldest until under limit
-        while len(self.thumbnails) > self.MAX_VISIBLE_THUMBNAILS:
-            oldest = sorted_paths.pop(0)
-            widget = self.thumbnails.pop(oldest)
-            self.mtime_cache.pop(oldest, None)
-            # Remove from layout and delete
-            self.thumbnail_layout.removeWidget(widget)
-            widget.deleteLater()
-        
-        # Also trim the worker cache
-        self.thumb_worker.trim_cache(self.MAX_VISIBLE_THUMBNAILS)
-    
-    def refresh_gallery(self):
-        """Full refresh - clears and reloads everything"""
-        # Clear all
-        self.thumbnails.clear()
-        self.known_files.clear()
-        while self.thumbnail_layout.count():
-            item = self.thumbnail_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        
-        # Reload
-        self._check_for_new_files()
-        
-    def _on_thumbnail_clicked(self, filepath: str):
-        """Handle thumbnail click - open full-size viewer"""
-        # Don't open viewer for pending previews (hi-res not arrived yet)
-        if filepath.startswith("__pending_"):
-            print(f"📷 Preview clicked - hi-res image still loading...")
+    def _on_item_clicked(self, filepath: str):
+        """Handle item click"""
+        if filepath.startswith("__pending"):
+            print(f"📷 Preview clicked - hi-res still loading...")
             return
         
         print(f"📷 Opening viewer: {filepath}")
-        
-        # Get all image files for navigation - use cached mtimes
-        image_files = sorted(
-            [str(f) for f in Path(self.captures_dir).glob("*.jpg")],
-            key=lambda x: self.mtime_cache.get(x, 0),
-            reverse=True
-        )
-        
-        # Open viewer
-        viewer = ImageViewer(filepath, image_files, self)
-        viewer.image_deleted.connect(self._on_image_deleted)
-        viewer.exec()
+        all_files = self.virtual_list.get_all_filepaths()
+        if filepath in all_files:
+            viewer = ImageViewer(filepath, all_files, self)
+            viewer.image_deleted.connect(self._on_image_deleted)
+            viewer.exec()
     
     def _on_image_deleted(self, filepath: str):
-        """Handle image deletion from viewer"""
-        print(f"🗑️ Image deleted, refreshing gallery: {filepath}")
-        if filepath in self.thumbnails:
-            widget = self.thumbnails.pop(filepath)
-            widget.deleteLater()
+        """Handle image deletion"""
+        self.virtual_list.remove_item(filepath)
         self.known_files.discard(filepath)
-        self._update_layout()
+        self._update_count()
+    
+    def _update_count(self):
+        total = self.virtual_list.item_count()
+        self.count_label.setText(f"{total} images")
+    
+    # =========================================================================
+    # PUBLIC API - Instant preview thumbnails
+    # =========================================================================
+    
+    def add_preview_thumbnail(self, camera_id: int, preview_pixmap):
+        """Add INSTANT preview thumbnail from video frame"""
+        print(f"    🖼️ add_preview_thumbnail called for camera {camera_id}")
         
-    def stop_auto_refresh(self):
-        """Stop auto-refresh timer and worker"""
+        # Remove existing preview for this camera
+        if camera_id in self.pending_previews:
+            old_fp = self.pending_previews.pop(camera_id)
+            self.virtual_list.remove_item(old_fp)
+        
+        # Add new preview
+        temp_filepath = f"__pending_camera_{camera_id}__"
+        
+        # Scale preview to thumbnail size
+        thumb = preview_pixmap.scaled(140, 90,
+                                      Qt.AspectRatioMode.KeepAspectRatio,
+                                      Qt.TransformationMode.FastTransformation)
+        
+        self.virtual_list.add_item(temp_filepath, thumb)
+        self.pending_previews[camera_id] = temp_filepath
+        
+        self._update_count()
+        print(f"    ✅ Preview thumbnail added for camera {camera_id} - total now: {self.virtual_list.item_count()}")
+    
+    def link_preview_to_file(self, camera_id: int, filepath: str):
+        """Link pending preview to actual hi-res file"""
+        if camera_id in self.pending_previews:
+            old_fp = self.pending_previews.pop(camera_id)
+            self.virtual_list.update_item(old_fp, filepath)
+            self.known_files.add(filepath)
+        else:
+            # No pending preview - add directly
+            self.virtual_list.add_item(filepath)
+            self.known_files.add(filepath)
+            self.loader.request(filepath, priority=True)
+        
+        self._update_count()
+    
+    def refresh_gallery(self):
+        """Manual refresh"""
+        self._check_for_new_files()
+    
+    def cleanup(self):
+        """Cleanup on close"""
         self.refresh_timer.stop()
-        self.thumb_worker.stop()
-        self.thumb_worker.wait()
-
-
-# Test code
-if __name__ == "__main__":
-    from PySide6.QtWidgets import QApplication
-    import sys
-    
-    print("Gallery Panel Test - OPTIMIZED VERSION")
-    
-    app = QApplication(sys.argv)
-    
-    # Create test captures directory
-    test_dir = "test_gallery_images"
-    os.makedirs(test_dir, exist_ok=True)
-    
-    # Generate some test images
-    from PIL import Image, ImageDraw
-    for i in range(12):
-        img = Image.new('RGB', (640, 480), color=(i*20, 100, 200-i*10))
-        draw = ImageDraw.Draw(img)
-        draw.text((250, 220), f"Test Image {i+1}", fill=(255, 255, 255))
-        img.save(f"{test_dir}/test_{i:03d}.jpg")
-    
-    # Create gallery
-    gallery = GalleryPanel(test_dir)
-    gallery.setMinimumSize(700, 500)
-    gallery.setStyleSheet("background-color: #1a1a1a;")
-    gallery.show()
-    
-    # Auto-close after 5 seconds
-    from PySide6.QtCore import QTimer
-    QTimer.singleShot(5000, app.quit)
-    
-    exit_code = app.exec()
-    
-    # Cleanup
-    import shutil
-    if os.path.exists(test_dir):
-        shutil.rmtree(test_dir)
-    
-    print(f"✓ Gallery test complete (exit code: {exit_code})")
-    sys.exit(exit_code)
+        self.loader.stop()
+        self.loader.wait()
