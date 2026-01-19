@@ -2,10 +2,12 @@
 """
 Full-Size Image Viewer for GERTIE Qt
 Opens when user clicks gallery thumbnail
-Features: Navigation, zoom, EXIF, delete
+Features: Navigation, zoom, delete, open folder
 """
 
 import os
+import subprocess
+import platform
 from pathlib import Path
 from datetime import datetime
 from PySide6.QtWidgets import (
@@ -126,6 +128,19 @@ class ImageViewer(QDialog):
         """)
         self.delete_btn.clicked.connect(self._delete_image)
         controls_layout.addWidget(self.delete_btn)
+        
+        # Open Folder button - opens hires_captures in file manager
+        open_folder_btn = QPushButton("📁 Open Folder")
+        open_folder_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #458;
+            }
+            QPushButton:hover {
+                background-color: #569;
+            }
+        """)
+        open_folder_btn.clicked.connect(self._open_folder)
+        controls_layout.addWidget(open_folder_btn)
         
         # Close
         close_btn = QPushButton("Close (Esc)")
@@ -258,6 +273,57 @@ class ImageViewer(QDialog):
                     
             except Exception as e:
                 QMessageBox.critical(self, "Delete Error", f"Failed to delete image: {e}")
+    
+    def _open_folder(self):
+        """Open the folder containing hi-res images in the system file manager"""
+        if not self.all_images:
+            return
+        
+        # Get the folder path from current image
+        image_path = self.all_images[self.current_index]
+        folder_path = os.path.dirname(os.path.abspath(image_path))
+        
+        try:
+            system = platform.system()
+            if system == "Linux":
+                # Try multiple file managers (Raspberry Pi uses PCManFM by default)
+                file_managers = [
+                    ["pcmanfm", folder_path],           # Raspberry Pi default
+                    ["nautilus", folder_path],          # GNOME
+                    ["thunar", folder_path],            # XFCE
+                    ["dolphin", folder_path],           # KDE
+                    ["xdg-open", folder_path],          # Generic Linux
+                ]
+                
+                opened = False
+                for fm_cmd in file_managers:
+                    try:
+                        subprocess.Popen(fm_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        opened = True
+                        print(f"📁 Opened folder: {folder_path}")
+                        break
+                    except FileNotFoundError:
+                        continue
+                
+                if not opened:
+                    QMessageBox.warning(self, "Open Folder", 
+                                       f"Could not find file manager.\nFolder path:\n{folder_path}")
+            
+            elif system == "Darwin":  # macOS
+                subprocess.Popen(["open", folder_path])
+                print(f"📁 Opened folder: {folder_path}")
+            
+            elif system == "Windows":
+                subprocess.Popen(["explorer", folder_path])
+                print(f"📁 Opened folder: {folder_path}")
+            
+            else:
+                QMessageBox.information(self, "Folder Path", 
+                                       f"Hi-res images folder:\n{folder_path}")
+                
+        except Exception as e:
+            QMessageBox.warning(self, "Open Folder Error", 
+                               f"Could not open folder:\n{e}\n\nPath: {folder_path}")
     
     def keyPressEvent(self, event: QKeyEvent):
         """Handle keyboard shortcuts"""

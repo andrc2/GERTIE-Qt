@@ -475,6 +475,10 @@ class GalleryPanel(QWidget):
         self.pending_previews[camera_id] = temp_filepath
         
         self._update_count()
+        
+        # AUTO-SCROLL TO TOP - show most recent captures instantly
+        self.scroll_area.verticalScrollBar().setValue(0)
+        
         print(f"    ✅ Preview thumbnail added for camera {camera_id} - total now: {self.virtual_list.item_count()}")
     
     def link_preview_to_file(self, camera_id: int, filepath: str):
