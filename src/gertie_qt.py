@@ -152,6 +152,14 @@ class MainWindow(QMainWindow):
         self.capture_count = 0
         self.current_frames = []
         
+        # Capture cooldown protection - prevent rapid-fire captures
+        self.capture_in_progress = False
+        self.capture_cooldown_timer = QTimer()
+        self.capture_cooldown_timer.setSingleShot(True)
+        self.capture_cooldown_timer.timeout.connect(self._capture_cooldown_complete)
+        self.pending_hires = set()  # Track which cameras we're waiting for
+        self.CAPTURE_COOLDOWN_MS = 8000  # 8 seconds cooldown (enough for all 8 cameras)
+        
         # UI
         self._setup_ui()
         
@@ -323,7 +331,21 @@ class MainWindow(QMainWindow):
     
     def _on_capture_all(self):
         """Handle capture all - INSTANT preview thumbnails from video frames!"""
+        
+        # COOLDOWN PROTECTION: Prevent rapid-fire captures that overwhelm the system
+        if self.capture_in_progress:
+            remaining = self.capture_cooldown_timer.remainingTime() / 1000
+            print(f"⏳ Capture in progress - please wait {remaining:.1f}s...")
+            self.status_bar.showMessage(f"Please wait {remaining:.1f}s between captures", 2000)
+            return
+        
         print("\n📷 Capturing all cameras...")
+        
+        # Set capture in progress
+        self.capture_in_progress = True
+        self.pending_hires = set(range(1, 9))  # Expecting 8 hi-res images
+        self.capture_cooldown_timer.start(self.CAPTURE_COOLDOWN_MS)
+        self.status_bar.showMessage("📷 Capture in progress...", self.CAPTURE_COOLDOWN_MS)
         
         # INSTANT: Create preview thumbnails from current video frames
         if hasattr(self, 'gallery'):
@@ -340,6 +362,16 @@ class MainWindow(QMainWindow):
         
         # Send actual capture command (hi-res images will arrive later)
         self.network_manager.send_capture_all()
+    
+    def _capture_cooldown_complete(self):
+        """Called when capture cooldown expires"""
+        self.capture_in_progress = False
+        if self.pending_hires:
+            print(f"⚠️ Capture timeout - missing cameras: {sorted(self.pending_hires)}")
+        else:
+            print("✅ All hi-res images received")
+        self.pending_hires.clear()
+        self.status_bar.showMessage("Ready to capture", 2000)
     
     def _save_frame_capture(self, camera_id: int):
         """Save current frame from buffer - OPTIMIZED: direct JPEG bytes write"""
@@ -393,6 +425,19 @@ class MainWindow(QMainWindow):
             # Link preview thumbnail to actual hi-res file (NO image_data - never load hi-res into GUI memory!)
             if hasattr(self, 'gallery'):
                 self.gallery.link_preview_to_file(camera_id, filename)
+            
+            # Track completion - allow early capture if all 8 received
+            if camera_id in self.pending_hires:
+                self.pending_hires.discard(camera_id)
+                remaining = len(self.pending_hires)
+                if remaining == 0 and self.capture_in_progress:
+                    # All images received - allow new captures immediately
+                    self.capture_cooldown_timer.stop()
+                    self.capture_in_progress = False
+                    print("✅ All 8 hi-res images received - ready for next capture")
+                    self.status_bar.showMessage("✅ Capture complete - ready", 2000)
+                elif remaining > 0:
+                    self.status_bar.showMessage(f"📷 Received {8-remaining}/8 hi-res...", 2000)
                 
         except Exception as e:
             print(f"  ⚠️ Still save error for camera {camera_id}: {e}")
