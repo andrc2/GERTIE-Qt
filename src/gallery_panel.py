@@ -91,6 +91,15 @@ class ThumbnailWorker(QThread):
     def stop(self):
         """Stop the worker thread"""
         self.running = False
+    
+    def trim_cache(self, max_size: int):
+        """Trim cache to prevent unbounded memory growth"""
+        with QMutexLocker(self.mutex):
+            if len(self._cache) > max_size:
+                # Remove oldest entries (FIFO approximation)
+                keys_to_remove = list(self._cache.keys())[:-max_size]
+                for key in keys_to_remove:
+                    del self._cache[key]
 
 
 class ThumbnailWidget(QFrame):
@@ -157,15 +166,18 @@ class ThumbnailWidget(QFrame):
 
 
 class GalleryPanel(QWidget):
-    """Panel displaying gallery of captured images - OPTIMIZED"""
+    """Panel displaying gallery of captured images - OPTIMIZED FOR LONG SESSIONS"""
+    
+    # Limit displayed thumbnails to prevent slowdown
+    MAX_VISIBLE_THUMBNAILS = 100
     
     def __init__(self, captures_dir: str, parent=None):
         super().__init__(parent)
         self.captures_dir = captures_dir
-        self.thumbnails = {}  # filepath -> ThumbnailWidget
+        self.thumbnails = {}  # filepath -> ThumbnailWidget (VISIBLE only)
         self.known_files = set()  # Track known files to detect new ones
-        self.mtime_cache = {}  # filepath -> mtime (avoid repeated stat calls)
-        self._layout_dirty = False  # Track if layout needs update
+        self.mtime_cache = {}  # filepath -> mtime (limited size)
+        self._pending_insert = []  # Batch inserts for efficiency
         self._setup_ui()
         
         # Background thumbnail worker
@@ -176,7 +188,7 @@ class GalleryPanel(QWidget):
         # Lightweight polling - just checks for new files, doesn't create thumbnails
         self.refresh_timer = QTimer()
         self.refresh_timer.timeout.connect(self._check_for_new_files)
-        self.refresh_timer.start(1000)  # Check every 1000ms (reduced from 500ms)
+        self.refresh_timer.start(1000)  # Check every 1000ms
         
         # Initial load
         self._check_for_new_files()
@@ -294,22 +306,32 @@ class GalleryPanel(QWidget):
             self.thumbnails[filepath].set_pixmap(pixmap)
     
     def _update_layout(self):
-        """Update grid layout with current thumbnails - OPTIMIZED"""
+        """Update grid layout with current thumbnails - OPTIMIZED with limit"""
         # Clear layout
         while self.thumbnail_layout.count():
             item = self.thumbnail_layout.takeAt(0)
             # Don't delete widgets, just remove from layout
         
-        # Sort by cached modification time (newest first) - avoids repeated stat calls
+        # Sort by cached modification time (newest first)
         sorted_files = sorted(
             self.thumbnails.keys(),
             key=lambda f: self.mtime_cache.get(f, 0),
             reverse=True
         )
         
+        # Limit to MAX_VISIBLE_THUMBNAILS
+        visible_files = sorted_files[:self.MAX_VISIBLE_THUMBNAILS]
+        
+        # Remove excess from thumbnails dict
+        for filepath in sorted_files[self.MAX_VISIBLE_THUMBNAILS:]:
+            widget = self.thumbnails.pop(filepath, None)
+            if widget:
+                widget.deleteLater()
+            self.mtime_cache.pop(filepath, None)
+        
         # Add to grid (4 per row)
         cols = 4
-        for i, filepath in enumerate(sorted_files):
+        for i, filepath in enumerate(visible_files):
             row = i // cols
             col = i % cols
             self.thumbnail_layout.addWidget(self.thumbnails[filepath], row, col)
@@ -331,8 +353,11 @@ class GalleryPanel(QWidget):
         self.thumbnails[filepath] = widget
         self.known_files.add(filepath)
         
-        # Insert at top of grid (INSTANT!)
-        self._insert_at_top(widget)
+        # Insert at position 0,0 and shift others (FAST: only moves pointers)
+        self._insert_at_top_fast(widget)
+        
+        # Enforce limit - remove oldest if over limit
+        self._enforce_thumbnail_limit()
         
         # Update count IMMEDIATELY
         self.count_label.setText(f"{len(self.thumbnails)} images")
@@ -340,24 +365,57 @@ class GalleryPanel(QWidget):
         # Queue thumbnail generation to background thread (non-blocking)
         self.thumb_worker.add_to_queue(filepath)
     
-    def _insert_at_top(self, new_widget):
-        """Insert widget at top of grid without rebuilding entire layout"""
-        # Get current widgets in order
+    def _insert_at_top_fast(self, new_widget):
+        """Insert widget at top - O(1) operation using layout index"""
+        # Simply insert at position 0 - Qt handles the rest
+        self.thumbnail_layout.addWidget(new_widget, 0, 0)
+        
+        # Rebuild layout only if we have more than a few items
+        # This is still O(n) but we limit n to MAX_VISIBLE_THUMBNAILS
+        if self.thumbnail_layout.count() > 4:
+            self._rebuild_grid_layout()
+    
+    def _rebuild_grid_layout(self):
+        """Rebuild grid layout efficiently"""
+        # Collect widgets in current order (newest first based on mtime)
         widgets = []
         while self.thumbnail_layout.count():
             item = self.thumbnail_layout.takeAt(0)
             if item.widget():
                 widgets.append(item.widget())
         
-        # Add new widget first, then rest
-        all_widgets = [new_widget] + widgets
+        # Sort by mtime (newest first)
+        widgets.sort(key=lambda w: self.mtime_cache.get(w.filepath, 0), reverse=True)
         
         # Re-add to grid (4 columns)
         cols = 4
-        for i, w in enumerate(all_widgets):
+        for i, w in enumerate(widgets):
             row = i // cols
             col = i % cols
             self.thumbnail_layout.addWidget(w, row, col)
+    
+    def _enforce_thumbnail_limit(self):
+        """Remove oldest thumbnails if over limit - prevents memory growth"""
+        if len(self.thumbnails) <= self.MAX_VISIBLE_THUMBNAILS:
+            return
+        
+        # Find oldest thumbnails by mtime
+        sorted_paths = sorted(
+            self.thumbnails.keys(),
+            key=lambda p: self.mtime_cache.get(p, 0)
+        )
+        
+        # Remove oldest until under limit
+        while len(self.thumbnails) > self.MAX_VISIBLE_THUMBNAILS:
+            oldest = sorted_paths.pop(0)
+            widget = self.thumbnails.pop(oldest)
+            self.mtime_cache.pop(oldest, None)
+            # Remove from layout and delete
+            self.thumbnail_layout.removeWidget(widget)
+            widget.deleteLater()
+        
+        # Also trim the worker cache
+        self.thumb_worker.trim_cache(self.MAX_VISIBLE_THUMBNAILS)
     
     def refresh_gallery(self):
         """Full refresh - clears and reloads everything"""
