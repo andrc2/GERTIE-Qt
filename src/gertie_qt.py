@@ -18,7 +18,7 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QGridLayout, 
     QLabel, QVBoxLayout, QHBoxLayout, QStatusBar, 
-    QPushButton, QSplitter, QProgressBar
+    QPushButton, QSplitter, QProgressBar, QSizePolicy
 )
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QPixmap
@@ -50,19 +50,18 @@ class CameraWidget(QWidget):
         layout.setSpacing(2)
         self.setLayout(layout)
         
-        # Video display
+        # Video display - NO setScaledContents to preserve aspect ratio
         self.video_label = QLabel()
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.video_label.setStyleSheet("""
             QLabel {
                 border: 2px solid #333;
                 background-color: #000;
-                min-width: 280px;
-                min-height: 210px;
             }
         """)
-        self.video_label.setScaledContents(True)
-        layout.addWidget(self.video_label)
+        self.video_label.setMinimumSize(200, 150)
+        self.video_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        layout.addWidget(self.video_label, 1)  # stretch factor
         
         # Controls
         controls = QHBoxLayout()
@@ -117,7 +116,16 @@ class CameraWidget(QWidget):
         self.settings_requested.emit(self.camera_id, self.ip)
     
     def update_frame(self, pixmap: QPixmap):
-        self.video_label.setPixmap(pixmap)
+        """Update video frame with proper aspect ratio scaling"""
+        if pixmap and not pixmap.isNull():
+            # Scale to fit label while preserving aspect ratio
+            label_size = self.video_label.size()
+            scaled = pixmap.scaled(
+                label_size.width() - 4, label_size.height() - 4,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation
+            )
+            self.video_label.setPixmap(scaled)
 
 
 class MainWindow(QMainWindow):
@@ -258,9 +266,14 @@ class MainWindow(QMainWindow):
         self.toggle_gallery_btn.clicked.connect(self._toggle_gallery)
         controls.addWidget(self.toggle_gallery_btn)
         
-        # Hi-res upload progress bar (small, in corner)
+        # Hi-res upload progress: label + bar
+        self.progress_label = QLabel("")
+        self.progress_label.setStyleSheet("color: #4a9eff; font-size: 10px;")
+        self.progress_label.hide()
+        controls.addWidget(self.progress_label)
+        
         self.upload_progress = QProgressBar()
-        self.upload_progress.setFixedSize(100, 16)
+        self.upload_progress.setFixedSize(80, 14)
         self.upload_progress.setTextVisible(False)
         self.upload_progress.setStyleSheet("""
             QProgressBar {
@@ -275,20 +288,21 @@ class MainWindow(QMainWindow):
         """)
         self.upload_progress.setRange(0, 8)
         self.upload_progress.setValue(0)
-        self.upload_progress.hide()  # Hidden when no uploads
+        self.upload_progress.hide()
         controls.addWidget(self.upload_progress)
         
         cameras_layout.addLayout(controls)
         
-        # Right side - Gallery
+        # Right side - Gallery (resizable via splitter)
         self.gallery = GalleryPanel(self.hires_captures_dir)
-        self.gallery.setMinimumWidth(300)
+        self.gallery.setMinimumWidth(150)
         
-        # Add to splitter
+        # Add to splitter - enables drag to resize
         self.splitter.addWidget(cameras_widget)
         self.splitter.addWidget(self.gallery)
         self.splitter.setStretchFactor(0, 7)
         self.splitter.setStretchFactor(1, 3)
+        self.splitter.setChildrenCollapsible(False)  # Prevent fully collapsing
         
         main_layout.addWidget(self.splitter)
         
@@ -362,10 +376,12 @@ class MainWindow(QMainWindow):
         # Add 8 more to pending count
         self.pending_hires_count += 8
         
-        # Show and reset progress bar
+        # Show progress bar and label
         self.upload_progress.setRange(0, self.pending_hires_count)
         self.upload_progress.setValue(0)
         self.upload_progress.show()
+        self.progress_label.setText(f"0/{self.pending_hires_count}")
+        self.progress_label.show()
         
         print(f"\n📷 Capturing... ({self.pending_hires_count} pending)")
         
@@ -436,17 +452,18 @@ class MainWindow(QMainWindow):
             # Decrement pending count and update progress bar
             if self.pending_hires_count > 0:
                 self.pending_hires_count -= 1
-                # Update progress bar (value = how many received)
                 received = self.upload_progress.maximum() - self.pending_hires_count
                 self.upload_progress.setValue(received)
+                self.progress_label.setText(f"{received}/{self.upload_progress.maximum()}")
             
             # Show status
             if self.pending_hires_count > 0:
                 print(f"  📸 Hi-res: {os.path.basename(filename)} ({size_kb:.0f}KB) [{self.pending_hires_count} left]")
             else:
                 print(f"  📸 Hi-res: {os.path.basename(filename)} ({size_kb:.0f}KB) [done]")
-                # Hide progress bar when complete
+                # Hide progress bar and label when complete
                 self.upload_progress.hide()
+                self.progress_label.hide()
             
             # Link preview thumbnail to actual hi-res file
             if hasattr(self, 'gallery'):
@@ -456,8 +473,16 @@ class MainWindow(QMainWindow):
             print(f"  ⚠️ Still save error for camera {camera_id}: {e}")
     
     def _toggle_gallery(self):
-        """Toggle gallery visibility"""
-        self.gallery.setVisible(self.toggle_gallery_btn.isChecked())
+        """Toggle gallery visibility using splitter"""
+        if self.toggle_gallery_btn.isChecked():
+            # Show gallery - restore size
+            self.gallery.show()
+            sizes = self.splitter.sizes()
+            total = sum(sizes)
+            self.splitter.setSizes([int(total * 0.7), int(total * 0.3)])
+        else:
+            # Hide gallery - give all space to cameras
+            self.gallery.hide()
     
     def keyPressEvent(self, event):
         """Handle keyboard"""
