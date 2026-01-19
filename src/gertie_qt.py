@@ -310,27 +310,32 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("Ready")
     
     def _update_frames(self):
-        """Update camera frames - NO DECODE, just display pre-decoded pixmaps"""
+        """Update camera frames - DECODE ONLY DIRTY FRAMES (once per camera per display tick)"""
         if self.paused:
             return
         
-        # Only update widgets with NEW frames (skip unchanged cameras)
+        # Only decode+update cameras with NEW frames (max 8 decodes per tick, not 240/sec)
         dirty_cameras = list(self.frame_dirty)
         self.frame_dirty.clear()
         
         for camera_id in dirty_cameras:
-            if camera_id in self.decoded_frames:
-                widget = self.camera_widgets[camera_id - 1]
-                widget.update_frame(self.decoded_frames[camera_id])
+            if camera_id in self.real_frames:
+                # Decode NOW (only for display, not for every incoming frame)
+                data = self.real_frames[camera_id]
+                pixmap = QPixmap()
+                if pixmap.loadFromData(data):
+                    self.decoded_frames[camera_id] = pixmap
+                    widget = self.camera_widgets[camera_id - 1]
+                    widget.update_frame(pixmap)
                 
                 # Store bytes for capture preview
                 if len(self.current_frames) < 8:
                     self.current_frames = [None] * 8
-                self.current_frames[camera_id - 1] = self.real_frames.get(camera_id)
+                self.current_frames[camera_id - 1] = data
         
         self.frame_count += 1
         
-        # Update status less frequently (every 60 frames instead of 30)
+        # Update status less frequently (every 60 frames)
         if self.frame_count % 60 == 0:
             elapsed = time.time() - self.start_time
             gui_fps = self.frame_count / elapsed if elapsed > 0 else 0
@@ -439,21 +444,17 @@ class MainWindow(QMainWindow):
         pass
     
     def _on_video_frame_received(self, ip: str, camera_id: int, data: bytes):
-        """Handle incoming video frame - DECODE IMMEDIATELY, display later"""
-        # Decode now (spreads work across incoming frames instead of batching)
-        pixmap = QPixmap()
-        if pixmap.loadFromData(data):
-            self.decoded_frames[camera_id] = pixmap
-            self.real_frames[camera_id] = data  # Keep bytes for saving
-            self.frame_dirty.add(camera_id)
+        """Handle incoming video frame - STORE BYTES ONLY, decode on display"""
+        # Just store raw bytes - decode lazily when display needs it
+        self.real_frames[camera_id] = data
+        self.frame_dirty.add(camera_id)
         
-        # Log first frame per camera
-        if not hasattr(self, '_frame_log_count'):
-            self._frame_log_count = {}
-        if camera_id not in self._frame_log_count:
-            self._frame_log_count[camera_id] = 0
+        # Log first frame per camera (one-time only)
+        if not hasattr(self, '_first_frame_logged'):
+            self._first_frame_logged = set()
+        if camera_id not in self._first_frame_logged:
+            self._first_frame_logged.add(camera_id)
             print(f"  📹 First frame from camera {camera_id}: {len(data)} bytes")
-        self._frame_log_count[camera_id] += 1
     
     def _on_still_image_received(self, camera_id: int, data: bytes, timestamp: str):
         """Handle incoming high-resolution still image from real camera"""

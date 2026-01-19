@@ -67,6 +67,7 @@ FEATURE_FLAGS = {
 # Capture lock to prevent overlapping captures
 _capture_lock = threading.Lock()
 _capture_in_progress = False
+_capture_start_time = 0  # For safety timeout
 
 # Universal camera settings - same for ALL cameras - REVERTED: Keep brightness fixes
 camera_settings = {
@@ -560,13 +561,20 @@ def handle_control_commands():
 
             # EXISTING COMMANDS (unchanged)
             if command == "CAPTURE_STILL":
-                # Use lock to prevent overlapping captures
-                global _capture_in_progress
+                # Use lock to prevent overlapping captures with safety timeout
+                global _capture_in_progress, _capture_start_time
                 with _capture_lock:
+                    # Safety: auto-release if previous capture took > 15 seconds
                     if _capture_in_progress:
-                        logging.warning("[SLAVE] Capture already in progress - ignoring duplicate command")
-                        continue
+                        elapsed = time.time() - _capture_start_time
+                        if elapsed > 15:
+                            logging.warning(f"[SLAVE] Previous capture stuck ({elapsed:.1f}s) - force releasing lock")
+                            _capture_in_progress = False
+                        else:
+                            logging.warning("[SLAVE] Capture already in progress - ignoring duplicate command")
+                            continue
                     _capture_in_progress = True
+                    _capture_start_time = time.time()
                 
                 def capture_with_lock():
                     global _capture_in_progress
@@ -575,6 +583,7 @@ def handle_control_commands():
                     finally:
                         with _capture_lock:
                             _capture_in_progress = False
+                            logging.info("[SLAVE] Capture lock released")
                 
                 threading.Thread(target=capture_with_lock, daemon=True).start()
             elif command == "RESTART_STREAM_WITH_SETTINGS":
