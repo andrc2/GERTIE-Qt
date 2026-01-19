@@ -45,11 +45,46 @@
 | Key | Current Qt Behavior | Required Behavior (Match Tkinter) |
 |-----|---------------------|-----------------------------------|
 | **Space** | Pause/Resume video | **Capture All** |
-| **1-8** | Capture individual (broken) | **Toggle camera preview** (show single camera fullscreen) |
+| **1-8** | Capture individual (broken) | **Toggle camera preview** (show single camera enlarged/exclusive mode) |
 | **R** | Reset stats | **Restart all streams** |
 | **C** | Capture All | Keep as-is (additional shortcut) |
-| **Escape** | Not implemented | **Show all cameras** (exit single-camera view) |
+| **Escape** | Not implemented | **Show all cameras** (exit exclusive/single-camera view) |
 | **S** | Not implemented | **Open settings panel** |
+
+**Note on 1-8 Toggle Behavior (Exclusive Mode)**:
+- Pressing 1-8 should enlarge that camera to fill the grid (hide others)
+- Pressing same key again OR Escape returns to normal 8-camera grid
+- This is called "exclusive mode" in Tkinter
+- Individual camera CAPTURE should be a separate feature (button or different shortcut)
+
+---
+
+### C4: WYSIWYG Aspect Ratio Mismatch
+**Status**: POTENTIALLY BROKEN (needs verification)
+**Issue**: Preview and capture may have different aspect ratios
+
+| Component | Resolution | Aspect Ratio |
+|-----------|------------|--------------|
+| Video Preview | 640×480 | 4:3 |
+| Sensor/Capture | 4608×2592 | 16:9 |
+
+**Impact**: What user sees in preview may NOT match final captured image
+**Required Fix**: 
+- Either match preview to 16:9 (640×360 or 854×480)
+- OR crop capture to match 4:3 preview
+- User must see EXACTLY what they will capture
+
+---
+
+### C5: Low FPS Performance
+**Status**: OBSERVED (8.6 FPS in testing, should be ~20)
+**Impact**: Sluggish preview, harder to verify focus
+**Possible Causes**:
+- JPEG decode overhead on main thread
+- Network congestion with 8 streams
+- GUI update frequency
+
+**Note**: This was partially addressed but may need further optimization
 
 ---
 
@@ -69,7 +104,20 @@
 
 ---
 
-### M2: Audio Feedback
+### M2: Individual Camera Capture (Separate from Toggle)
+**Status**: NOT IMPLEMENTED
+**Issue**: 1-8 keys will be for toggle preview, need separate capture method
+**Required Features**:
+- [ ] "Capture" button in each camera widget (already exists but broken)
+- [ ] OR right-click context menu → Capture
+- [ ] OR Ctrl+1-8 for individual capture
+- [ ] Must create hi-res JPEG on slave
+- [ ] Must add thumbnail to gallery
+- [ ] Must show capture feedback (flash, sound)
+
+---
+
+### M3: Audio Feedback
 **Status**: NOT IMPLEMENTED
 **Required Features**:
 - [ ] Shutter sound on capture
@@ -81,7 +129,7 @@
 
 ---
 
-### M3: Visual Status Indicators
+### M4: Visual Status Indicators
 **Status**: NOT IMPLEMENTED
 **Required Features**:
 - [ ] Heartbeat status dots per camera (🟢 online, 🔴 offline, 🟡 idle)
@@ -92,7 +140,7 @@
 
 ---
 
-### M4: Menu Bar System
+### M5: Menu Bar System
 **Status**: NOT IMPLEMENTED
 **Required Menus**:
 - [ ] File menu (Exit)
@@ -102,7 +150,7 @@
 
 ---
 
-### M5: Device Naming Dialog
+### M6: Device Naming Dialog
 **Status**: NOT IMPLEMENTED
 **Required Features**:
 - [ ] Custom names for each camera (rep1 → "Dorsal", etc.)
@@ -113,7 +161,7 @@
 
 ---
 
-### M6: App Preferences Dialog
+### M7: App Preferences Dialog
 **Status**: NOT IMPLEMENTED
 **Required Features**:
 - [ ] Audio enable/disable
@@ -123,7 +171,7 @@
 
 ---
 
-### M7: Keyboard Shortcuts Help Bar
+### M8: Keyboard Shortcuts Help Bar
 **Status**: NOT IMPLEMENTED
 **Required**: Display shortcuts at bottom of window:
 ```
@@ -278,3 +326,39 @@ sudo poweroff         - Shutdown device
 ---
 
 **END OF REQUIREMENTS DOCUMENT**
+
+---
+
+## 📊 CURRENT SESSION STATUS (Update Each Session)
+
+**Last Session**: 2026-01-19
+**Last Commit**: 7496129 (this document)
+**USB Synced**: ✅
+**GitHub Synced**: ✅
+
+### What Was Accomplished This Session:
+1. Fixed instant thumbnails (reverted lazy decode) - Commit fcb9f4a
+2. Added automatic time sync from control1 RTC - Commit 4ba6833
+3. Created this requirements document - Commit 7496129
+4. Verified 4 consecutive capture batches work (32 captures, 0 timeouts)
+
+### Current System State:
+- Capture All (C key): ✅ WORKING
+- Individual Capture: ❌ BROKEN
+- Keyboard shortcuts: ❌ WRONG MAPPING
+- Brightness/ISO: ❌ NOT WORKING
+- Time sync: ✅ WORKING (added this session)
+- FPS: ⚠️ 8.6 (lower than ideal)
+
+### Next Session Should Start With:
+1. Read this entire document
+2. Read session log: `~/Desktop/GERTIE_SESSION_LOG.md` (last 100 lines)
+3. Check git status: `cd ~/Desktop/GERTIE_Qt && git log -1 --oneline`
+4. Begin with Phase 1: Fix Critical Bugs (keyboard shortcuts first)
+
+### Hardware Testing Needed:
+- [ ] Verify brightness settings work after fix
+- [ ] Verify ISO settings work after fix
+- [ ] Test individual capture after fix
+- [ ] Test keyboard shortcuts after fix
+- [ ] Test restart/shutdown functions after implementation
