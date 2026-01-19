@@ -376,9 +376,9 @@ class MainWindow(QMainWindow):
             self.capture_count += 1
             print(f"  📸 Hi-res saved: {filename} ({size_kb:.1f} KB)")
             
-            # Add to gallery INSTANTLY (placeholder appears immediately, thumbnail loads in background)
+            # Add to gallery INSTANTLY - pass image bytes to avoid disk read!
             if hasattr(self, 'gallery'):
-                self.gallery.add_image_immediately(filename)
+                self.gallery.add_image_immediately(filename, image_data=data)
                 
         except Exception as e:
             print(f"  ⚠️ Still save error for camera {camera_id}: {e}")

@@ -29,18 +29,26 @@ class ThumbnailWorker(QThread):
     
     def __init__(self):
         super().__init__()
-        self.priority_queue = []  # NEW captures - process first!
-        self.queue = []  # Existing files - process after
+        self.priority_queue = []  # NEW captures: (filepath, bytes) - process first!
+        self.queue = []  # Existing files: filepath only - process after
         self.mutex = QMutex()
         self.running = True
         self._cache = {}  # filepath -> QPixmap cache
     
-    def add_to_queue(self, filepath: str, priority: bool = True):
-        """Add file to thumbnail generation queue (priority=True for new captures)"""
+    def add_to_queue(self, filepath: str, image_data: bytes = None, priority: bool = True):
+        """Add file to thumbnail generation queue
+        
+        Args:
+            filepath: Path to the image file
+            image_data: Raw JPEG bytes (if available, avoids disk read!)
+            priority: True for new captures, False for existing files
+        """
         with QMutexLocker(self.mutex):
             if filepath not in self._cache:
-                if priority and filepath not in self.priority_queue:
-                    self.priority_queue.append(filepath)  # New captures first!
+                if priority:
+                    # Check not already queued
+                    if not any(item[0] == filepath for item in self.priority_queue):
+                        self.priority_queue.append((filepath, image_data))
                 elif filepath not in self.queue:
                     self.queue.append(filepath)
     
@@ -52,33 +60,39 @@ class ThumbnailWorker(QThread):
     def run(self):
         """Process thumbnail queue in background - PRIORITY QUEUE FIRST"""
         while self.running:
+            item = None
             filepath = None
+            image_data = None
+            
             with QMutexLocker(self.mutex):
-                # Priority queue first (new captures)
+                # Priority queue first (new captures with bytes)
                 if self.priority_queue:
-                    filepath = self.priority_queue.pop(0)
+                    item = self.priority_queue.pop(0)
+                    filepath, image_data = item
                 elif self.queue:
                     filepath = self.queue.pop(0)
+                    image_data = None
             
             if filepath:
-                pixmap = self._create_thumbnail_fast(filepath)
+                pixmap = self._create_thumbnail_fast(filepath, image_data)
                 if pixmap:
                     with QMutexLocker(self.mutex):
                         self._cache[filepath] = pixmap
                     self.thumbnail_ready.emit(filepath, pixmap)
             else:
-                self.msleep(20)  # Shorter sleep for faster response
+                self.msleep(20)  # Short sleep when queue empty
     
-    def _create_thumbnail_fast(self, filepath: str) -> QPixmap:
-        """Create thumbnail FAST using Qt native loading"""
+    def _create_thumbnail_fast(self, filepath: str, image_data: bytes = None) -> QPixmap:
+        """Create thumbnail FAST - use provided bytes if available, else read from disk"""
         try:
-            # Read file bytes directly
-            with open(filepath, 'rb') as f:
-                data = f.read()
+            # Use provided bytes (FAST!) or read from disk (slower)
+            if image_data is None:
+                with open(filepath, 'rb') as f:
+                    image_data = f.read()
             
-            # Qt native JPEG decode + fast scale (MUCH faster than PIL!)
+            # Qt native JPEG decode + fast scale
             pixmap = QPixmap()
-            if pixmap.loadFromData(data):
+            if pixmap.loadFromData(image_data):
                 return pixmap.scaled(150, 150, 
                                     Qt.AspectRatioMode.KeepAspectRatio,
                                     Qt.TransformationMode.FastTransformation)
@@ -362,8 +376,8 @@ class GalleryPanel(QWidget):
         # Update count IMMEDIATELY
         self.count_label.setText(f"{len(self.thumbnails)} images")
         
-        # Queue thumbnail generation to background thread (non-blocking)
-        self.thumb_worker.add_to_queue(filepath)
+        # Queue thumbnail generation - pass image_data to avoid disk read!
+        self.thumb_worker.add_to_queue(filepath, image_data=image_data, priority=True)
     
     def _insert_at_top_fast(self, new_widget):
         """Insert widget at top - O(1) operation using layout index"""
