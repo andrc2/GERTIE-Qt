@@ -1,8 +1,48 @@
 # GERTIE Qt Conversion - Complete Requirements & Issues
 
 **Last Updated**: 2026-01-19
-**Purpose**: Mandatory reference for ALL Qt conversion sessions
+**Purpose**: Mandatory reference for ALL GERTIE sessions
 **Rule**: Read this document at the start of EVERY session to ensure no omissions
+
+---
+
+## ⚡ ABSOLUTE PRIORITIES (Never Compromise)
+
+### Priority 1: PERFORMANCE & RESPONSIVENESS
+**This is the HIGHEST priority for all development work.**
+- GUI must remain smooth and responsive at all times
+- No lag, freezing, or sluggish behavior
+- Video preview must update fluidly (~20+ FPS target)
+- User interactions (clicks, keypresses) must respond instantly
+- Background operations must NOT block the main thread
+- If a feature causes performance degradation, fix performance FIRST
+
+### Priority 2: CORE FUNCTIONALITY PRESERVATION
+**These features MUST always work - never break them:**
+- High-resolution JPEG capture (4608×2592 from all 8 cameras)
+- 8-camera simultaneous video preview
+- Instant thumbnail generation on capture
+- Gallery with image viewing/navigation/deletion
+- Settings persistence across sessions
+- Network communication with all slaves
+
+### Priority 3: WYSIWYG (What You See Is What You Get)
+**Preview must EXACTLY match final capture:**
+- Camera settings reflected in live preview
+- Crop region shown in preview = crop in final image
+- Brightness, contrast, ISO visible in preview before capture
+
+---
+
+## 🔧 PROJECT CONTEXT
+
+**IMPORTANT**: All GERTIE development is now Qt conversion ONLY.
+- **Active Project**: `GERTIE_Qt` (`~/Desktop/GERTIE_Qt`)
+- **Reference Only**: `GERTIE_Tkinter` (for feature parity, NOT being developed)
+- **Assumption**: Any GERTIE work request = Qt conversion project
+- **Deployment**: Via `sync_to_slaves.sh` to 8 Raspberry Pi cameras
+
+**Do NOT modify GERTIE_Tkinter** - it is reference material only.
 
 ---
 
@@ -256,10 +296,12 @@ Shortcuts: [Space] Capture All | [1-8] Focus Camera | [Esc] Show All | [S] Setti
 
 ## 📋 IMPLEMENTATION PRIORITY ORDER
 
-### Phase 1: Fix Critical Bugs
-1. Fix brightness/ISO settings not working
-2. Fix individual camera capture
-3. Fix keyboard shortcuts (Space=Capture, 1-8=Toggle, R=Restart)
+**REMEMBER**: Performance is ALWAYS the highest priority. If implementing a feature causes lag or sluggishness, fix the performance issue BEFORE continuing.
+
+### Phase 1: Fix Critical Bugs (Performance-Safe)
+1. Fix keyboard shortcuts (Space=Capture, 1-8=Toggle, R=Restart, Escape=ShowAll, S=Settings)
+2. Fix individual camera capture (button + separate shortcut)
+3. Fix brightness/ISO settings (verify no performance impact)
 
 ### Phase 2: System Controls
 4. Add restart all streams function
@@ -267,17 +309,25 @@ Shortcuts: [Space] Capture All | [1-8] Focus Camera | [Esc] Show All | [S] Setti
 6. Add restart/shutdown all devices
 7. Create System menu in menu bar
 
-### Phase 3: WYSIWYG Tools
-8. Create visual drag-based crop tool
-9. Ensure all camera settings reflect in preview
+### Phase 3: WYSIWYG Tools (Performance-Critical)
+8. Create visual drag-based crop tool (must not lag)
+9. Ensure all camera settings reflect in preview (without frame drops)
 10. Debug and fix all camera controls
 
 ### Phase 4: Polish
-11. Add audio feedback
-12. Add status indicators (heartbeat, state)
+11. Add audio feedback (non-blocking)
+12. Add status indicators (lightweight updates only)
 13. Add device naming dialog
 14. Add app preferences dialog
 15. Add shortcuts help bar
+
+### Performance Checkpoints
+**After EVERY feature implementation:**
+- [ ] Verify FPS remains ≥15 (target ≥20)
+- [ ] Verify no GUI freezing or lag
+- [ ] Verify capture still works (8/8 cameras)
+- [ ] Verify thumbnails still instant
+- [ ] Test with rapid repeated actions
 
 ---
 
@@ -312,16 +362,57 @@ sudo poweroff         - Shutdown device
 - System Menu: `GERTIE_Tkinter/master/camera_gui/menu/system_menu.py`
 - Audio: `GERTIE_Tkinter/master/camera_gui/utils/audio_feedback.py`
 
+**Note**: These are READ-ONLY references. Do NOT modify Tkinter code.
+
+---
+
+## 🚀 PERFORMANCE GUIDELINES
+
+### What Causes Lag (AVOID):
+- JPEG decoding on main thread (use background threads)
+- Blocking network calls (use async/queued)
+- Creating/destroying widgets repeatedly (reuse widgets)
+- Large memory allocations during frame updates
+- Synchronous file I/O during video playback
+- Excessive logging/printing during frame processing
+
+### What Keeps It Fast (DO):
+- Decode frames in background, display on main thread
+- Use dirty flags to skip unnecessary updates
+- Pre-allocate buffers and reuse them
+- Batch UI updates (don't update 8 cameras 30× each per second)
+- Use Qt's built-in scaling (setScaledContents) over manual scaling
+- Keep main thread event loop responsive
+
+### Performance Red Flags:
+- FPS drops below 10 → STOP and fix immediately
+- GUI freezes for >100ms → STOP and fix immediately  
+- Mouse/keyboard lag → STOP and fix immediately
+- Memory usage climbing → investigate leaks
+
+### Known Performance Decisions:
+- Using `setScaledContents(True)` for video (may stretch slightly, but avoids 240 scale ops/sec)
+- Decoding frames immediately on receive (keeps decoded_frames ready for instant thumbnails)
+- Timer-based frame updates at 20Hz (not per-frame callbacks)
+
 ---
 
 ## ⚠️ SESSION PROTOCOL REMINDER
 
-**At the start of EVERY Qt conversion session:**
-1. Read this document completely
+**At the start of EVERY GERTIE session:**
+1. Read this document completely (especially ⚡ ABSOLUTE PRIORITIES)
 2. Check which items are still outstanding
 3. Update session log with current focus
 4. Do NOT skip items or assume they are done
 5. Test features on hardware before marking complete
+
+**Key Reminders:**
+- GERTIE = Qt conversion project (never Tkinter)
+- Tkinter is REFERENCE ONLY for feature parity
+- Performance is ALWAYS the highest priority
+- Never break: hi-res capture, video preview, thumbnails, responsiveness
+- All development in `~/Desktop/GERTIE_Qt`
+- All deployment via `sync_to_slaves.sh`
 
 ---
 
