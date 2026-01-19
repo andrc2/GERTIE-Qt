@@ -11,7 +11,6 @@ Features:
 """
 
 import os
-import io
 import time
 from pathlib import Path
 from PySide6.QtWidgets import (
@@ -20,27 +19,30 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QThread, QMutex, QMutexLocker
 from PySide6.QtGui import QPixmap
-from PIL import Image
 from image_viewer import ImageViewer
 
 
 class ThumbnailWorker(QThread):
-    """Background worker for thumbnail generation - doesn't block UI"""
+    """Background worker for FAST thumbnail generation"""
     
     thumbnail_ready = Signal(str, QPixmap)  # filepath, pixmap
     
     def __init__(self):
         super().__init__()
-        self.queue = []
+        self.priority_queue = []  # NEW captures - process first!
+        self.queue = []  # Existing files - process after
         self.mutex = QMutex()
         self.running = True
         self._cache = {}  # filepath -> QPixmap cache
     
-    def add_to_queue(self, filepath: str):
-        """Add file to thumbnail generation queue"""
+    def add_to_queue(self, filepath: str, priority: bool = True):
+        """Add file to thumbnail generation queue (priority=True for new captures)"""
         with QMutexLocker(self.mutex):
-            if filepath not in self.queue and filepath not in self._cache:
-                self.queue.append(filepath)
+            if filepath not in self._cache:
+                if priority and filepath not in self.priority_queue:
+                    self.priority_queue.append(filepath)  # New captures first!
+                elif filepath not in self.queue:
+                    self.queue.append(filepath)
     
     def get_cached(self, filepath: str):
         """Get cached thumbnail if available"""
@@ -48,37 +50,39 @@ class ThumbnailWorker(QThread):
             return self._cache.get(filepath)
     
     def run(self):
-        """Process thumbnail queue in background"""
+        """Process thumbnail queue in background - PRIORITY QUEUE FIRST"""
         while self.running:
             filepath = None
             with QMutexLocker(self.mutex):
-                if self.queue:
+                # Priority queue first (new captures)
+                if self.priority_queue:
+                    filepath = self.priority_queue.pop(0)
+                elif self.queue:
                     filepath = self.queue.pop(0)
             
             if filepath:
-                pixmap = self._create_thumbnail(filepath)
+                pixmap = self._create_thumbnail_fast(filepath)
                 if pixmap:
                     with QMutexLocker(self.mutex):
                         self._cache[filepath] = pixmap
                     self.thumbnail_ready.emit(filepath, pixmap)
             else:
-                self.msleep(50)  # Brief sleep when queue empty
+                self.msleep(20)  # Shorter sleep for faster response
     
-    def _create_thumbnail(self, filepath: str) -> QPixmap:
-        """Create thumbnail from file - runs in background thread"""
+    def _create_thumbnail_fast(self, filepath: str) -> QPixmap:
+        """Create thumbnail FAST using Qt native loading"""
         try:
-            # Load and resize with PIL
-            img = Image.open(filepath)
-            img.thumbnail((150, 150), Image.Resampling.LANCZOS)
+            # Read file bytes directly
+            with open(filepath, 'rb') as f:
+                data = f.read()
             
-            # Convert to QPixmap via bytes (no temp file!)
-            buffer = io.BytesIO()
-            img.save(buffer, format='JPEG', quality=80)
-            buffer.seek(0)
-            
+            # Qt native JPEG decode + fast scale (MUCH faster than PIL!)
             pixmap = QPixmap()
-            pixmap.loadFromData(buffer.getvalue())
-            return pixmap
+            if pixmap.loadFromData(data):
+                return pixmap.scaled(150, 150, 
+                                    Qt.AspectRatioMode.KeepAspectRatio,
+                                    Qt.TransformationMode.FastTransformation)
+            return None
             
         except Exception as e:
             print(f"Thumbnail error for {filepath}: {e}")
@@ -256,7 +260,7 @@ class GalleryPanel(QWidget):
                     widget.deleteLater()
                 self.mtime_cache.pop(filepath, None)
             
-            # Queue new files for thumbnail generation
+            # Queue new files for thumbnail generation (LOW priority - let new captures go first)
             for filepath in new_files:
                 # Cache mtime when first seen (avoid repeated stat calls)
                 try:
@@ -264,7 +268,7 @@ class GalleryPanel(QWidget):
                 except:
                     self.mtime_cache[filepath] = 0
                 self._add_placeholder(filepath)
-                self.thumb_worker.add_to_queue(filepath)
+                self.thumb_worker.add_to_queue(filepath, priority=False)  # Low priority
             
             self.known_files = current_files
             
