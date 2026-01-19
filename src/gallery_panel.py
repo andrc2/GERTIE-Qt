@@ -130,24 +130,24 @@ class GalleryPanel(QWidget):
         header.addWidget(self.count_label)
         layout.addLayout(header)
         
-        # Navigation
+        # Navigation - UP for newer, DOWN for older
         nav = QHBoxLayout()
-        self.prev_btn = QLabel("◀")
-        self.prev_btn.setStyleSheet("color: #666; font-size: 12px;")
-        self.prev_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.prev_btn.mousePressEvent = lambda e: self._prev_page()
-        nav.addWidget(self.prev_btn)
+        self.up_btn = QLabel("▲")
+        self.up_btn.setStyleSheet("color: #666; font-size: 14px;")
+        self.up_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.up_btn.mousePressEvent = lambda e: self._newer_page()
+        nav.addWidget(self.up_btn)
         
         self.page_label = QLabel("1/1")
         self.page_label.setStyleSheet("color: #888; font-size: 9px;")
         self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         nav.addWidget(self.page_label, 1)
         
-        self.next_btn = QLabel("▶")
-        self.next_btn.setStyleSheet("color: #666; font-size: 12px;")
-        self.next_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.next_btn.mousePressEvent = lambda e: self._next_page()
-        nav.addWidget(self.next_btn)
+        self.down_btn = QLabel("▼")
+        self.down_btn.setStyleSheet("color: #666; font-size: 14px;")
+        self.down_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.down_btn.mousePressEvent = lambda e: self._older_page()
+        nav.addWidget(self.down_btn)
         layout.addLayout(nav)
         
         # 8 thumbnail widgets in vertical stack
@@ -210,19 +210,19 @@ class GalleryPanel(QWidget):
         self.count_label.setText(str(total))
         self.page_label.setText(f"{self.current_page + 1}/{pages}")
         
-        # Nav colors
-        self.next_btn.setStyleSheet(f"color: {'#666' if self.current_page == 0 else '#4a9eff'}; font-size: 12px;")
-        self.prev_btn.setStyleSheet(f"color: {'#666' if self.current_page >= pages - 1 else '#4a9eff'}; font-size: 12px;")
+        # Nav colors - up=newer, down=older
+        self.up_btn.setStyleSheet(f"color: {'#666' if self.current_page == 0 else '#4a9eff'}; font-size: 14px;")
+        self.down_btn.setStyleSheet(f"color: {'#666' if self.current_page >= pages - 1 else '#4a9eff'}; font-size: 14px;")
     
-    def _prev_page(self):
-        """Older images"""
+    def _older_page(self):
+        """Down arrow - older images"""
         pages = max(1, (len(self.items) + 7) // 8)
         if self.current_page < pages - 1:
             self.current_page += 1
             self._refresh_display()
     
-    def _next_page(self):
-        """Newer images"""
+    def _newer_page(self):
+        """Up arrow - newer images"""
         if self.current_page > 0:
             self.current_page -= 1
             self._refresh_display()
