@@ -18,7 +18,7 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QGridLayout, 
     QLabel, QVBoxLayout, QHBoxLayout, QStatusBar, 
-    QPushButton, QSplitter
+    QPushButton, QSplitter, QProgressBar
 )
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QPixmap
@@ -258,6 +258,26 @@ class MainWindow(QMainWindow):
         self.toggle_gallery_btn.clicked.connect(self._toggle_gallery)
         controls.addWidget(self.toggle_gallery_btn)
         
+        # Hi-res upload progress bar (small, in corner)
+        self.upload_progress = QProgressBar()
+        self.upload_progress.setFixedSize(100, 16)
+        self.upload_progress.setTextVisible(False)
+        self.upload_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #555;
+                border-radius: 3px;
+                background-color: #333;
+            }
+            QProgressBar::chunk {
+                background-color: #4a9eff;
+                border-radius: 2px;
+            }
+        """)
+        self.upload_progress.setRange(0, 8)
+        self.upload_progress.setValue(0)
+        self.upload_progress.hide()  # Hidden when no uploads
+        controls.addWidget(self.upload_progress)
+        
         cameras_layout.addLayout(controls)
         
         # Right side - Gallery
@@ -342,12 +362,12 @@ class MainWindow(QMainWindow):
         # Add 8 more to pending count
         self.pending_hires_count += 8
         
-        if self.pending_hires_count > 8:
-            print(f"\n📷 Capturing all cameras... ({self.pending_hires_count} images queued)")
-            self.status_bar.showMessage(f"📷 Queued ({self.pending_hires_count} pending)", 2000)
-        else:
-            print("\n📷 Capturing all cameras...")
-            self.status_bar.showMessage("📷 Capturing...", 2000)
+        # Show and reset progress bar
+        self.upload_progress.setRange(0, self.pending_hires_count)
+        self.upload_progress.setValue(0)
+        self.upload_progress.show()
+        
+        print(f"\n📷 Capturing... ({self.pending_hires_count} pending)")
         
         # INSTANT: Create preview thumbnails from current video frames
         if hasattr(self, 'gallery'):
@@ -355,11 +375,11 @@ class MainWindow(QMainWindow):
                 if camera_id in self.decoded_frames:
                     preview_pixmap = self.decoded_frames[camera_id]
                     if preview_pixmap and not preview_pixmap.isNull():
-                        # Scale to thumbnail size
-                        thumb = preview_pixmap.scaled(150, 150,
+                        # Scale to thumbnail size (25% larger: 175x113)
+                        thumb = preview_pixmap.scaled(175, 113,
                                                       Qt.AspectRatioMode.KeepAspectRatio,
                                                       Qt.TransformationMode.FastTransformation)
-                        # Add to gallery as preview (will be updated when hi-res arrives)
+                        # Add to gallery as preview
                         self.gallery.add_preview_thumbnail(camera_id, thumb)
         
         # Send actual capture command (hi-res images will arrive later)
@@ -413,17 +433,20 @@ class MainWindow(QMainWindow):
             size_kb = len(data) / 1024
             self.capture_count += 1
             
-            # Decrement pending count
+            # Decrement pending count and update progress bar
             if self.pending_hires_count > 0:
                 self.pending_hires_count -= 1
+                # Update progress bar (value = how many received)
+                received = self.upload_progress.maximum() - self.pending_hires_count
+                self.upload_progress.setValue(received)
             
             # Show status
             if self.pending_hires_count > 0:
-                print(f"  📸 Hi-res saved: {filename} ({size_kb:.1f} KB) [{self.pending_hires_count} pending]")
-                self.status_bar.showMessage(f"📷 {self.pending_hires_count} images pending...", 1000)
+                print(f"  📸 Hi-res: {os.path.basename(filename)} ({size_kb:.0f}KB) [{self.pending_hires_count} left]")
             else:
-                print(f"  📸 Hi-res saved: {filename} ({size_kb:.1f} KB) [queue empty]")
-                self.status_bar.showMessage("✅ All captures complete", 2000)
+                print(f"  📸 Hi-res: {os.path.basename(filename)} ({size_kb:.0f}KB) [done]")
+                # Hide progress bar when complete
+                self.upload_progress.hide()
             
             # Link preview thumbnail to actual hi-res file
             if hasattr(self, 'gallery'):
