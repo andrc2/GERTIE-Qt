@@ -64,6 +64,10 @@ FEATURE_FLAGS = {
     'SETTINGS_PERSISTENCE': True
 }
 
+# Capture lock to prevent overlapping captures
+_capture_lock = threading.Lock()
+_capture_in_progress = False
+
 # Universal camera settings - same for ALL cameras - REVERTED: Keep brightness fixes
 camera_settings = {
     # Basic camera controls - REVERTED: Keep GUI brightness scale that was working
@@ -556,7 +560,23 @@ def handle_control_commands():
 
             # EXISTING COMMANDS (unchanged)
             if command == "CAPTURE_STILL":
-                threading.Thread(target=capture_still, daemon=True).start()
+                # Use lock to prevent overlapping captures
+                global _capture_in_progress
+                with _capture_lock:
+                    if _capture_in_progress:
+                        logging.warning("[SLAVE] Capture already in progress - ignoring duplicate command")
+                        continue
+                    _capture_in_progress = True
+                
+                def capture_with_lock():
+                    global _capture_in_progress
+                    try:
+                        capture_still()
+                    finally:
+                        with _capture_lock:
+                            _capture_in_progress = False
+                
+                threading.Thread(target=capture_with_lock, daemon=True).start()
             elif command == "RESTART_STREAM_WITH_SETTINGS":
                 restart_video_stream()
             elif command == "START_STREAM":

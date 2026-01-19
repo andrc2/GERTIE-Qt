@@ -159,6 +159,7 @@ class MainWindow(QMainWindow):
         
         # Capture queue tracking (no cooldown - uses adaptive chunk sizing instead)
         self.pending_hires_count = 0  # Number of hi-res images pending
+        self.capture_timeout_timer = None  # Timer to reset stuck captures
         
         # UI
         self._setup_ui()
@@ -397,6 +398,26 @@ class MainWindow(QMainWindow):
         
         # Send actual capture command (hi-res images will arrive later)
         self.network_manager.send_capture_all()
+        
+        # Start timeout timer - reset if images don't arrive within 20 seconds
+        if self.capture_timeout_timer:
+            self.capture_timeout_timer.stop()
+        self.capture_timeout_timer = QTimer()
+        self.capture_timeout_timer.setSingleShot(True)
+        self.capture_timeout_timer.timeout.connect(self._on_capture_timeout)
+        self.capture_timeout_timer.start(20000)  # 20 seconds
+    
+    def _on_capture_timeout(self):
+        """Handle capture timeout - reset progress if images don't arrive"""
+        if self.pending_hires_count > 0:
+            missing = self.pending_hires_count
+            print(f"\n⚠️ TIMEOUT: {missing} images did not arrive - resetting progress")
+            self.status_bar.showMessage(f"⚠️ Timeout: {missing} images missing - cameras may need restart", 5000)
+            
+            # Reset progress
+            self.pending_hires_count = 0
+            self.upload_progress.hide()
+            self.progress_label.hide()
     
     def _save_frame_capture(self, camera_id: int):
         """Save current frame from buffer - OPTIMIZED: direct JPEG bytes write"""
@@ -458,7 +479,9 @@ class MainWindow(QMainWindow):
                 print(f"  📸 Hi-res: {os.path.basename(filename)} ({size_kb:.0f}KB) [{self.pending_hires_count} left]")
             else:
                 print(f"  📸 Hi-res: {os.path.basename(filename)} ({size_kb:.0f}KB) [done]")
-                # Hide progress bar and label when complete
+                # All images received - stop timeout timer and hide progress
+                if self.capture_timeout_timer:
+                    self.capture_timeout_timer.stop()
                 self.upload_progress.hide()
                 self.progress_label.hide()
             
