@@ -14,7 +14,6 @@ import sys
 import os
 import time
 import logging
-import numpy as np
 from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QGridLayout, 
@@ -23,7 +22,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QPixmap
-from PIL.ImageQt import ImageQt
 
 # Import our modules
 from network_manager import NetworkManager
@@ -155,10 +153,10 @@ class MainWindow(QMainWindow):
         # UI
         self._setup_ui()
         
-        # Timer
+        # Timer - OPTIMIZED: 50ms (20fps) is sufficient for preview
         self.timer = QTimer()
         self.timer.timeout.connect(self._update_frames)
-        self.timer.start(33)
+        self.timer.start(50)
         
         print("="*70)
         print("GERTIE Qt - Production Network Mode")
@@ -275,29 +273,30 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("Ready")
     
     def _update_frames(self):
-        """Update camera frames from network"""
+        """Update camera frames from network - OPTIMIZED: direct JPEG→QPixmap"""
         if self.paused:
             return
         
-        # Use real frames from network
+        # Use real frames from network (stored as raw JPEG bytes)
         for i, widget in enumerate(self.camera_widgets):
             camera_id = i + 1
             if camera_id in self.real_frames:
-                frame = self.real_frames[camera_id]
-                # Convert numpy array to PIL Image to QPixmap
-                from PIL import Image
-                pil_image = Image.fromarray(frame)
-                qimage = ImageQt(pil_image)
-                pixmap = QPixmap.fromImage(qimage)
+                jpeg_data = self.real_frames[camera_id]
+                
+                # Direct JPEG→QPixmap using Qt's native decoder (FAST!)
+                pixmap = QPixmap()
+                pixmap.loadFromData(jpeg_data)
                 widget.update_frame(pixmap)
-                # Store for capture
+                
+                # Store for capture preview (keep JPEG bytes)
                 if len(self.current_frames) < 8:
                     self.current_frames = [None] * 8
-                self.current_frames[i] = pil_image
+                self.current_frames[i] = jpeg_data
         
         self.frame_count += 1
         
-        if self.frame_count % 30 == 0:
+        # Update status less frequently (every 60 frames instead of 30)
+        if self.frame_count % 60 == 0:
             elapsed = time.time() - self.start_time
             gui_fps = self.frame_count / elapsed if elapsed > 0 else 0
             self.status_bar.showMessage(
@@ -329,15 +328,17 @@ class MainWindow(QMainWindow):
         self.network_manager.send_capture_all()
     
     def _save_frame_capture(self, camera_id: int):
-        """Save current frame from buffer"""
+        """Save current frame from buffer - OPTIMIZED: direct JPEG bytes write"""
         try:
             if camera_id - 1 < len(self.current_frames):
-                frame = self.current_frames[camera_id - 1]
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-                filename = f"{self.captures_dir}/rep{camera_id}_{timestamp}.jpg"
-                frame.save(filename, quality=95)
-                self.capture_count += 1
-                print(f"  ✓ Saved: {filename}")
+                jpeg_data = self.current_frames[camera_id - 1]
+                if jpeg_data:
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+                    filename = f"{self.captures_dir}/rep{camera_id}_{timestamp}.jpg"
+                    with open(filename, 'wb') as f:
+                        f.write(jpeg_data)
+                    self.capture_count += 1
+                    print(f"  ✓ Saved: {filename}")
         except Exception as e:
             print(f"  ✗ Error: {e}")
     
@@ -346,30 +347,17 @@ class MainWindow(QMainWindow):
         pass
     
     def _on_video_frame_received(self, ip: str, camera_id: int, data: bytes):
-        """Handle incoming video frame from real camera"""
-        try:
-            import io
-            from PIL import Image
-            
-            # Decode JPEG frame
-            image = Image.open(io.BytesIO(data))
-            
-            # Convert to numpy array for display
-            frame = np.array(image)
-            
-            # Store in buffer (keyed by camera_id)
-            self.real_frames[camera_id] = frame
-            
-            # Log first frame per camera
-            if not hasattr(self, '_frame_log_count'):
-                self._frame_log_count = {}
-            if camera_id not in self._frame_log_count:
-                self._frame_log_count[camera_id] = 0
-                print(f"  📹 First decoded frame from camera {camera_id}: {frame.shape}")
-            self._frame_log_count[camera_id] += 1
-            
-        except Exception as e:
-            print(f"  ⚠️ Frame decode error for camera {camera_id}: {e}")
+        """Handle incoming video frame from real camera - OPTIMIZED: store JPEG bytes directly"""
+        # Store raw JPEG bytes (no decoding here - done lazily in display)
+        self.real_frames[camera_id] = data
+        
+        # Log first frame per camera
+        if not hasattr(self, '_frame_log_count'):
+            self._frame_log_count = {}
+        if camera_id not in self._frame_log_count:
+            self._frame_log_count[camera_id] = 0
+            print(f"  📹 First frame from camera {camera_id}: {len(data)} bytes")
+        self._frame_log_count[camera_id] += 1
     
     def _on_still_image_received(self, camera_id: int, data: bytes, timestamp: str):
         """Handle incoming high-resolution still image from real camera"""
