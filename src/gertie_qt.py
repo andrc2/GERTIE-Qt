@@ -172,6 +172,15 @@ class MainWindow(QMainWindow):
         print("  1-8: Capture individual camera")
         print("  ⚙️ button: Per-camera settings")
         print("="*70)
+        
+        # Start video streams on all cameras after short delay
+        # (ensures network manager is fully ready)
+        QTimer.singleShot(2000, self._start_all_streams)
+    
+    def _start_all_streams(self):
+        """Start video streaming on all cameras"""
+        print("\n📡 Starting video streams on all cameras...")
+        self.network_manager.send_start_all_streams()
     
     def _setup_ui(self):
         """Setup UI with splitter for camera/gallery"""
