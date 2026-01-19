@@ -135,7 +135,9 @@ class MainWindow(QMainWindow):
         self.network_manager.still_image_received.connect(self._on_still_image_received)
         
         # Real video frame buffers (camera_id -> latest frame)
-        self.real_frames = {}
+        self.real_frames = {}  # Raw JPEG bytes for saving
+        self.decoded_frames = {}  # Pre-decoded QPixmaps for display
+        self.frame_dirty = set()  # Track which cameras have new frames
         
         # High-res captures directory
         self.hires_captures_dir = "hires_captures"
@@ -273,25 +275,23 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("Ready")
     
     def _update_frames(self):
-        """Update camera frames from network - OPTIMIZED: direct JPEG→QPixmap"""
+        """Update camera frames - NO DECODE, just display pre-decoded pixmaps"""
         if self.paused:
             return
         
-        # Use real frames from network (stored as raw JPEG bytes)
-        for i, widget in enumerate(self.camera_widgets):
-            camera_id = i + 1
-            if camera_id in self.real_frames:
-                jpeg_data = self.real_frames[camera_id]
+        # Only update widgets with NEW frames (skip unchanged cameras)
+        dirty_cameras = list(self.frame_dirty)
+        self.frame_dirty.clear()
+        
+        for camera_id in dirty_cameras:
+            if camera_id in self.decoded_frames:
+                widget = self.camera_widgets[camera_id - 1]
+                widget.update_frame(self.decoded_frames[camera_id])
                 
-                # Direct JPEG→QPixmap using Qt's native decoder (FAST!)
-                pixmap = QPixmap()
-                pixmap.loadFromData(jpeg_data)
-                widget.update_frame(pixmap)
-                
-                # Store for capture preview (keep JPEG bytes)
+                # Store bytes for capture preview
                 if len(self.current_frames) < 8:
                     self.current_frames = [None] * 8
-                self.current_frames[i] = jpeg_data
+                self.current_frames[camera_id - 1] = self.real_frames.get(camera_id)
         
         self.frame_count += 1
         
@@ -347,9 +347,13 @@ class MainWindow(QMainWindow):
         pass
     
     def _on_video_frame_received(self, ip: str, camera_id: int, data: bytes):
-        """Handle incoming video frame from real camera - OPTIMIZED: store JPEG bytes directly"""
-        # Store raw JPEG bytes (no decoding here - done lazily in display)
-        self.real_frames[camera_id] = data
+        """Handle incoming video frame - DECODE IMMEDIATELY, display later"""
+        # Decode now (spreads work across incoming frames instead of batching)
+        pixmap = QPixmap()
+        if pixmap.loadFromData(data):
+            self.decoded_frames[camera_id] = pixmap
+            self.real_frames[camera_id] = data  # Keep bytes for saving
+            self.frame_dirty.add(camera_id)
         
         # Log first frame per camera
         if not hasattr(self, '_frame_log_count'):
