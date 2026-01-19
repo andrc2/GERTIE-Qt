@@ -12,6 +12,7 @@ Features:
 
 import os
 import io
+import time
 from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
@@ -159,6 +160,8 @@ class GalleryPanel(QWidget):
         self.captures_dir = captures_dir
         self.thumbnails = {}  # filepath -> ThumbnailWidget
         self.known_files = set()  # Track known files to detect new ones
+        self.mtime_cache = {}  # filepath -> mtime (avoid repeated stat calls)
+        self._layout_dirty = False  # Track if layout needs update
         self._setup_ui()
         
         # Background thumbnail worker
@@ -169,7 +172,7 @@ class GalleryPanel(QWidget):
         # Lightweight polling - just checks for new files, doesn't create thumbnails
         self.refresh_timer = QTimer()
         self.refresh_timer.timeout.connect(self._check_for_new_files)
-        self.refresh_timer.start(500)  # Check every 500ms (faster detection)
+        self.refresh_timer.start(1000)  # Check every 1000ms (reduced from 500ms)
         
         # Initial load
         self._check_for_new_files()
@@ -251,9 +254,15 @@ class GalleryPanel(QWidget):
                 if filepath in self.thumbnails:
                     widget = self.thumbnails.pop(filepath)
                     widget.deleteLater()
+                self.mtime_cache.pop(filepath, None)
             
             # Queue new files for thumbnail generation
             for filepath in new_files:
+                # Cache mtime when first seen (avoid repeated stat calls)
+                try:
+                    self.mtime_cache[filepath] = os.path.getmtime(filepath)
+                except:
+                    self.mtime_cache[filepath] = 0
                 self._add_placeholder(filepath)
                 self.thumb_worker.add_to_queue(filepath)
             
@@ -281,16 +290,16 @@ class GalleryPanel(QWidget):
             self.thumbnails[filepath].set_pixmap(pixmap)
     
     def _update_layout(self):
-        """Update grid layout with current thumbnails"""
+        """Update grid layout with current thumbnails - OPTIMIZED"""
         # Clear layout
         while self.thumbnail_layout.count():
             item = self.thumbnail_layout.takeAt(0)
             # Don't delete widgets, just remove from layout
         
-        # Sort by modification time (newest first)
+        # Sort by cached modification time (newest first) - avoids repeated stat calls
         sorted_files = sorted(
             self.thumbnails.keys(),
-            key=lambda f: os.path.getmtime(f) if os.path.exists(f) else 0,
+            key=lambda f: self.mtime_cache.get(f, 0),
             reverse=True
         )
         
@@ -305,20 +314,25 @@ class GalleryPanel(QWidget):
         self.count_label.setText(f"{len(self.thumbnails)} images")
     
     def add_image_immediately(self, filepath: str, image_data: bytes = None):
-        """Add new image immediately (called when capture received)"""
+        """Add new image immediately (called when capture received) - OPTIMIZED"""
         if filepath in self.thumbnails:
             return  # Already have it
         
-        # Create thumbnail from bytes if provided (fastest path)
+        # Cache mtime now
+        try:
+            self.mtime_cache[filepath] = os.path.getmtime(filepath)
+        except:
+            self.mtime_cache[filepath] = time.time()  # Use current time if file not ready
+        
+        # Create thumbnail from bytes if provided - use Qt scaling for speed
         pixmap = None
         if image_data:
             try:
-                img = Image.open(io.BytesIO(image_data))
-                img.thumbnail((150, 150), Image.Resampling.LANCZOS)
-                buffer = io.BytesIO()
-                img.save(buffer, format='JPEG', quality=80)
-                pixmap = QPixmap()
-                pixmap.loadFromData(buffer.getvalue())
+                # Direct load + Qt scaling (faster than PIL for thumbnails)
+                full_pixmap = QPixmap()
+                full_pixmap.loadFromData(image_data)
+                pixmap = full_pixmap.scaled(150, 150, Qt.AspectRatioMode.KeepAspectRatio, 
+                                           Qt.TransformationMode.SmoothTransformation)
             except Exception as e:
                 print(f"Immediate thumbnail error: {e}")
         
@@ -351,10 +365,10 @@ class GalleryPanel(QWidget):
         """Handle thumbnail click - open full-size viewer"""
         print(f"📷 Opening viewer: {filepath}")
         
-        # Get all image files for navigation
+        # Get all image files for navigation - use cached mtimes
         image_files = sorted(
             [str(f) for f in Path(self.captures_dir).glob("*.jpg")],
-            key=lambda x: os.path.getmtime(x) if os.path.exists(x) else 0,
+            key=lambda x: self.mtime_cache.get(x, 0),
             reverse=True
         )
         
