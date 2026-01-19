@@ -8,14 +8,14 @@ StartLimitIntervalSec=0
 Type=simple
 User=andrc1
 Group=andrc1
-WorkingDirectory=/home/andrc1/camera_system_integrated_final
+WorkingDirectory=/home/andrc1/camera_system_qt_conversion
 ExecStartPre=/bin/sleep 5
-ExecStart=/usr/bin/python3 /home/andrc1/camera_system_integrated_final/slave/still_capture.py
+ExecStart=/usr/bin/python3 /home/andrc1/camera_system_qt_conversion/slave/still_capture.py
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-Environment=PYTHONPATH=/home/andrc1/camera_system_integrated_final
+Environment=PYTHONPATH=/home/andrc1/camera_system_qt_conversion
 
 [Install]
 WantedBy=multi-user.target

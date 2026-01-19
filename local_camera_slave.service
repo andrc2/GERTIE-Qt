@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 User=andrc1
-WorkingDirectory=/home/andrc1/camera_system_integrated_final
+WorkingDirectory=/home/andrc1/camera_system_qt_conversion
 ExecStart=/usr/bin/python3 local_camera_slave.py
 Restart=always
 RestartSec=5
