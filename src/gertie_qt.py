@@ -376,9 +376,9 @@ class MainWindow(QMainWindow):
             self.capture_count += 1
             print(f"  📸 Hi-res saved: {filename} ({size_kb:.1f} KB)")
             
-            # OPTIMIZED: Add to gallery immediately with image data (no polling delay)
-            if hasattr(self, 'gallery') and self.gallery.isVisible():
-                self.gallery.add_image_immediately(filename, data)
+            # Add to gallery INSTANTLY (placeholder appears immediately, thumbnail loads in background)
+            if hasattr(self, 'gallery'):
+                self.gallery.add_image_immediately(filename)
                 
         except Exception as e:
             print(f"  ⚠️ Still save error for camera {camera_id}: {e}")

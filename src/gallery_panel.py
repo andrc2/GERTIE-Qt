@@ -314,39 +314,46 @@ class GalleryPanel(QWidget):
         self.count_label.setText(f"{len(self.thumbnails)} images")
     
     def add_image_immediately(self, filepath: str, image_data: bytes = None):
-        """Add new image immediately (called when capture received) - OPTIMIZED"""
+        """Add new image INSTANTLY - placeholder appears immediately, thumbnail loads in background"""
         if filepath in self.thumbnails:
             return  # Already have it
         
-        # Cache mtime now
-        try:
-            self.mtime_cache[filepath] = os.path.getmtime(filepath)
-        except:
-            self.mtime_cache[filepath] = time.time()  # Use current time if file not ready
+        # Cache mtime
+        self.mtime_cache[filepath] = time.time()
         
-        # Create thumbnail from bytes if provided - use Qt scaling for speed
-        pixmap = None
-        if image_data:
-            try:
-                # Direct load + Qt scaling (faster than PIL for thumbnails)
-                full_pixmap = QPixmap()
-                full_pixmap.loadFromData(image_data)
-                pixmap = full_pixmap.scaled(150, 150, Qt.AspectRatioMode.KeepAspectRatio, 
-                                           Qt.TransformationMode.SmoothTransformation)
-            except Exception as e:
-                print(f"Immediate thumbnail error: {e}")
-        
-        # Add widget
-        widget = ThumbnailWidget(filepath, pixmap)
+        # Create widget with NO pixmap (shows "Loading..." placeholder - INSTANT!)
+        widget = ThumbnailWidget(filepath, None)
         widget.clicked.connect(self._on_thumbnail_clicked)
         self.thumbnails[filepath] = widget
         self.known_files.add(filepath)
         
-        # If no pixmap yet, queue for background generation
-        if not pixmap:
-            self.thumb_worker.add_to_queue(filepath)
+        # Insert at top of grid (INSTANT!)
+        self._insert_at_top(widget)
         
-        self._update_layout()
+        # Update count IMMEDIATELY
+        self.count_label.setText(f"{len(self.thumbnails)} images")
+        
+        # Queue thumbnail generation to background thread (non-blocking)
+        self.thumb_worker.add_to_queue(filepath)
+    
+    def _insert_at_top(self, new_widget):
+        """Insert widget at top of grid without rebuilding entire layout"""
+        # Get current widgets in order
+        widgets = []
+        while self.thumbnail_layout.count():
+            item = self.thumbnail_layout.takeAt(0)
+            if item.widget():
+                widgets.append(item.widget())
+        
+        # Add new widget first, then rest
+        all_widgets = [new_widget] + widgets
+        
+        # Re-add to grid (4 columns)
+        cols = 4
+        for i, w in enumerate(all_widgets):
+            row = i // cols
+            col = i % cols
+            self.thumbnail_layout.addWidget(w, row, col)
     
     def refresh_gallery(self):
         """Full refresh - clears and reloads everything"""
