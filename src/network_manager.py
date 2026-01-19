@@ -628,19 +628,35 @@ class StillReceiver(QThread):
         logger.info("[STILL_RX] Receiver thread stopped")
     
     def _receive_image(self, conn, ip, camera_id):
-        """Receive complete image from connection"""
+        """Receive complete image from connection with adaptive chunk sizing"""
         try:
             chunks = []
             total_size = 0
             
+            # Adaptive chunk size based on active connections
+            # More connections = smaller chunks = more responsive GUI
+            active_count = getattr(self, '_active_receives', 0)
+            self._active_receives = active_count + 1
+            
+            # Adaptive chunk sizing: 64KB when idle, down to 8KB when busy
+            if active_count >= 6:
+                chunk_size = 8192    # 8KB - very busy
+            elif active_count >= 4:
+                chunk_size = 16384   # 16KB - busy
+            elif active_count >= 2:
+                chunk_size = 32768   # 32KB - moderate
+            else:
+                chunk_size = 65536   # 64KB - idle
+            
             while True:
-                chunk = conn.recv(65536)
+                chunk = conn.recv(chunk_size)
                 if not chunk:
                     break
                 chunks.append(chunk)
                 total_size += len(chunk)
             
             conn.close()
+            self._active_receives = max(0, getattr(self, '_active_receives', 1) - 1)
             
             if total_size > 0:
                 image_data = b''.join(chunks)
@@ -654,6 +670,7 @@ class StillReceiver(QThread):
                 logger.warning(f"[STILL_RX] Empty image from camera {camera_id}")
                 
         except Exception as e:
+            self._active_receives = max(0, getattr(self, '_active_receives', 1) - 1)
             logger.error(f"[STILL_RX] Receive error from {ip}: {e}")
         finally:
             try:

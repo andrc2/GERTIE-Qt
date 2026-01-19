@@ -152,13 +152,8 @@ class MainWindow(QMainWindow):
         self.capture_count = 0
         self.current_frames = []
         
-        # Capture cooldown protection - prevent rapid-fire captures
-        self.capture_in_progress = False
-        self.capture_cooldown_timer = QTimer()
-        self.capture_cooldown_timer.setSingleShot(True)
-        self.capture_cooldown_timer.timeout.connect(self._capture_cooldown_complete)
-        self.pending_hires = set()  # Track which cameras we're waiting for
-        self.CAPTURE_COOLDOWN_MS = 8000  # 8 seconds cooldown (enough for all 8 cameras)
+        # Capture queue tracking (no cooldown - uses adaptive chunk sizing instead)
+        self.pending_hires_count = 0  # Number of hi-res images pending
         
         # UI
         self._setup_ui()
@@ -330,22 +325,29 @@ class MainWindow(QMainWindow):
         self.network_manager.send_settings(ip, settings)
     
     def _on_capture_all(self):
-        """Handle capture all - INSTANT preview thumbnails from video frames!"""
+        """Handle capture all - INSTANT preview thumbnails from video frames!
         
-        # COOLDOWN PROTECTION: Prevent rapid-fire captures that overwhelm the system
-        if self.capture_in_progress:
-            remaining = self.capture_cooldown_timer.remainingTime() / 1000
-            print(f"⏳ Capture in progress - please wait {remaining:.1f}s...")
-            self.status_bar.showMessage(f"Please wait {remaining:.1f}s between captures", 2000)
+        Uses adaptive chunk sizing in network receiver to handle queue depth.
+        Smaller chunks when busy = GUI stays responsive.
+        """
+        
+        # Queue depth protection - allow multiple captures but limit queue
+        MAX_PENDING = 24  # Max 24 hi-res images in flight (3 batches)
+        
+        if self.pending_hires_count >= MAX_PENDING:
+            print(f"⚠️ Queue full ({self.pending_hires_count} images pending) - please wait...")
+            self.status_bar.showMessage(f"⏳ Queue full - {self.pending_hires_count} images downloading...", 2000)
             return
         
-        print("\n📷 Capturing all cameras...")
+        # Add 8 more to pending count
+        self.pending_hires_count += 8
         
-        # Set capture in progress
-        self.capture_in_progress = True
-        self.pending_hires = set(range(1, 9))  # Expecting 8 hi-res images
-        self.capture_cooldown_timer.start(self.CAPTURE_COOLDOWN_MS)
-        self.status_bar.showMessage("📷 Capture in progress...", self.CAPTURE_COOLDOWN_MS)
+        if self.pending_hires_count > 8:
+            print(f"\n📷 Capturing all cameras... ({self.pending_hires_count} images queued)")
+            self.status_bar.showMessage(f"📷 Queued ({self.pending_hires_count} pending)", 2000)
+        else:
+            print("\n📷 Capturing all cameras...")
+            self.status_bar.showMessage("📷 Capturing...", 2000)
         
         # INSTANT: Create preview thumbnails from current video frames
         if hasattr(self, 'gallery'):
@@ -362,16 +364,6 @@ class MainWindow(QMainWindow):
         
         # Send actual capture command (hi-res images will arrive later)
         self.network_manager.send_capture_all()
-    
-    def _capture_cooldown_complete(self):
-        """Called when capture cooldown expires"""
-        self.capture_in_progress = False
-        if self.pending_hires:
-            print(f"⚠️ Capture timeout - missing cameras: {sorted(self.pending_hires)}")
-        else:
-            print("✅ All hi-res images received")
-        self.pending_hires.clear()
-        self.status_bar.showMessage("Ready to capture", 2000)
     
     def _save_frame_capture(self, camera_id: int):
         """Save current frame from buffer - OPTIMIZED: direct JPEG bytes write"""
@@ -420,24 +412,22 @@ class MainWindow(QMainWindow):
             
             size_kb = len(data) / 1024
             self.capture_count += 1
-            print(f"  📸 Hi-res saved: {filename} ({size_kb:.1f} KB)")
             
-            # Link preview thumbnail to actual hi-res file (NO image_data - never load hi-res into GUI memory!)
+            # Decrement pending count
+            if self.pending_hires_count > 0:
+                self.pending_hires_count -= 1
+            
+            # Show status
+            if self.pending_hires_count > 0:
+                print(f"  📸 Hi-res saved: {filename} ({size_kb:.1f} KB) [{self.pending_hires_count} pending]")
+                self.status_bar.showMessage(f"📷 {self.pending_hires_count} images pending...", 1000)
+            else:
+                print(f"  📸 Hi-res saved: {filename} ({size_kb:.1f} KB) [queue empty]")
+                self.status_bar.showMessage("✅ All captures complete", 2000)
+            
+            # Link preview thumbnail to actual hi-res file
             if hasattr(self, 'gallery'):
                 self.gallery.link_preview_to_file(camera_id, filename)
-            
-            # Track completion - allow early capture if all 8 received
-            if camera_id in self.pending_hires:
-                self.pending_hires.discard(camera_id)
-                remaining = len(self.pending_hires)
-                if remaining == 0 and self.capture_in_progress:
-                    # All images received - allow new captures immediately
-                    self.capture_cooldown_timer.stop()
-                    self.capture_in_progress = False
-                    print("✅ All 8 hi-res images received - ready for next capture")
-                    self.status_bar.showMessage("✅ Capture complete - ready", 2000)
-                elif remaining > 0:
-                    self.status_bar.showMessage(f"📷 Received {8-remaining}/8 hi-res...", 2000)
                 
         except Exception as e:
             print(f"  ⚠️ Still save error for camera {camera_id}: {e}")
