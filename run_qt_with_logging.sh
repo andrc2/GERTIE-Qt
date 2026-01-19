@@ -31,6 +31,34 @@ log_both() {
     echo "$1" >> "$CUMULATIVE_LOG"
 }
 
+# ============================================
+# TIME SYNC: Sync all Pi clocks to control1
+# (control1 has RTC battery backup)
+# ============================================
+log_both "[$TIMESTAMP] [INFO] Syncing time to all cameras from control1 RTC..."
+echo "Syncing time to all cameras..."
+
+CONTROL1_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+log_both "[$TIMESTAMP] [INFO] Control1 time: $CONTROL1_TIME"
+
+SYNC_SUCCESS=0
+SYNC_FAIL=0
+
+for ip in 201 202 203 204 205 206 207; do
+    SLAVE_NAME="rep$((ip - 200))"
+    if ssh -o ConnectTimeout=3 andrc1@192.168.0.$ip "sudo date -s '$CONTROL1_TIME'" > /dev/null 2>&1; then
+        log_both "[$TIMESTAMP] [INFO] $SLAVE_NAME (192.168.0.$ip): Time synced ✓"
+        ((SYNC_SUCCESS++))
+    else
+        log_both "[$TIMESTAMP] [WARN] $SLAVE_NAME (192.168.0.$ip): Time sync FAILED"
+        ((SYNC_FAIL++))
+    fi
+done
+
+log_both "[$TIMESTAMP] [INFO] Time sync complete: $SYNC_SUCCESS success, $SYNC_FAIL failed"
+echo "Time sync complete: $SYNC_SUCCESS/7 cameras synced"
+log_both ""
+
 # Capture system state
 log_both "[$TIMESTAMP] [INFO] System state before Qt GUI launch:"
 
