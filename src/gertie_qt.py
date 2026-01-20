@@ -30,9 +30,9 @@ from camera_settings_dialog import CameraSettingsDialog
 from config import get_ip_from_camera_id, SLAVES
 
 # Resolution settings for exclusive mode
-# Higher resolution in exclusive mode allows better focus checking
+# Pi HQ Camera has 4:3 native sensor (4056x3040) - use 4:3 resolutions to avoid cropping!
 NORMAL_RESOLUTION = (640, 480)    # 4:3 - efficient for 8-camera grid
-EXCLUSIVE_RESOLUTION = (1280, 720)  # 16:9 HD - better for focus checking
+EXCLUSIVE_RESOLUTION = (1280, 960)  # 4:3 HD - matches HQ camera native aspect ratio
 ENABLE_RESOLUTION_SWITCHING = True  # Re-enabled: GUI freeze was from decode-on-signal, not resolution switching
 
 
