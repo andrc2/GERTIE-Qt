@@ -33,7 +33,7 @@ from config import get_ip_from_camera_id, SLAVES
 # Higher resolution in exclusive mode allows better focus checking
 NORMAL_RESOLUTION = (640, 480)    # 4:3 - efficient for 8-camera grid
 EXCLUSIVE_RESOLUTION = (1280, 720)  # 16:9 HD - better for focus checking
-ENABLE_RESOLUTION_SWITCHING = False  # Disabled: may cause stream interruption. Aspect ratio fix alone improves quality.
+ENABLE_RESOLUTION_SWITCHING = True  # Request HD in exclusive mode for focus checking
 
 
 class CameraWidget(QWidget):
