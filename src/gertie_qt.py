@@ -30,33 +30,20 @@ from camera_settings_dialog import CameraSettingsDialog
 from config import get_ip_from_camera_id, SLAVES
 
 # ============================================================================
-# LOGGING SETUP - Writes to ~/Desktop/qt_gui.log for troubleshooting
+# LOGGING SETUP - Outputs to stdout, captured by run_qt_with_logging.sh
+# Logs go to: updatelog.txt (cumulative) + qt_latest.log (session)
 # ============================================================================
-LOG_DIR = os.path.expanduser("~/Desktop")
-GUI_LOG_FILE = os.path.join(LOG_DIR, "qt_gui.log")
-
-# Create file handler for GUI-specific logging
 gui_logger = logging.getLogger("GERTIE_GUI")
 gui_logger.setLevel(logging.DEBUG)
 
-# File handler - detailed logs to file
-file_handler = logging.FileHandler(GUI_LOG_FILE, mode='a')
-file_handler.setLevel(logging.DEBUG)
-file_handler.setFormatter(logging.Formatter(
-    '%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-))
-gui_logger.addHandler(file_handler)
-
-# Console handler - info level to stdout
+# Console handler only - stdout captured by run_qt_with_logging.sh tee command
 console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.INFO)
-console_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S'))
+console_handler.setLevel(logging.DEBUG)  # DEBUG level to capture all details
+console_handler.setFormatter(logging.Formatter(
+    '%(asctime)s [GUI:%(levelname)s] %(message)s', 
+    datefmt='%H:%M:%S'
+))
 gui_logger.addHandler(console_handler)
-
-gui_logger.info("=" * 70)
-gui_logger.info("GERTIE Qt GUI Starting - Log file: %s", GUI_LOG_FILE)
-gui_logger.info("=" * 70)
 
 # Resolution settings for exclusive mode
 # Pi HQ Camera has 4:3 native sensor (4056x3040) - use 4:3 resolutions to avoid cropping!

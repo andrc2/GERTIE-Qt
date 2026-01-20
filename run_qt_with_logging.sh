@@ -94,6 +94,30 @@ log_both "======================================================================
 log_both "[$TIMESTAMP] SESSION COMPLETE"
 log_both "========================================================================"
 
+# ============================================
+# POST-SESSION: Collect slave logs for troubleshooting
+# ============================================
+log_both ""
+log_both "[$TIMESTAMP] [INFO] Collecting slave service logs for troubleshooting..."
+
+# Collect resolution and capture logs from each slave
+for ip in 201 202 203 204 205 206 207; do
+    SLAVE_NAME="rep$((ip - 200))"
+    log_both ""
+    log_both "--- $SLAVE_NAME (192.168.0.$ip) recent logs ---"
+    # Get last 30 lines from both services, filter for key events
+    ssh -o ConnectTimeout=3 andrc1@192.168.0.$ip "journalctl -u gertie-video.service -u gertie-capture.service -n 30 --no-pager 2>/dev/null | grep -E 'RESOLUTION|CAPTURE|ERROR|WARNING|Starting|Restarting'" 2>/dev/null | tee -a "$LATEST_LOG" | tee -a "$CUMULATIVE_LOG"
+done
+
+# Local rep8 logs
+log_both ""
+log_both "--- rep8 (local) recent logs ---"
+journalctl -u local_camera_slave.service -n 30 --no-pager 2>/dev/null | grep -E 'RESOLUTION|CAPTURE|ERROR|WARNING|Starting|Restarting' | tee -a "$LATEST_LOG" | tee -a "$CUMULATIVE_LOG"
+
+log_both ""
+log_both "[$TIMESTAMP] [INFO] Slave log collection complete"
+log_both "========================================================================"
+
 # Copy latest to archive
 cp "$LATEST_LOG" "$ARCHIVE_LOG"
 
