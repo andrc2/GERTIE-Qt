@@ -1,5 +1,5 @@
 [Unit]
-Description=Still Capture Service (Fixed)
+Description=Still Capture Service (Qt Conversion)
 After=network.target video_stream.service
 Requires=video_stream.service
 StartLimitIntervalSec=0

@@ -1,5 +1,5 @@
 [Unit]
-Description=Video Stream Service (Fixed)
+Description=Video Stream Service (Qt Conversion)
 After=network.target
 
 [Service]
