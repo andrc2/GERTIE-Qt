@@ -140,6 +140,7 @@ def load_device_settings(device_name):
     settings_file = f"/home/andrc1/camera_system_integrated_final/{device_name}_settings.json"
     
     # FIXED: Default settings with correct GUI brightness scale
+    # FIXED: Crop defaults now use 4:3 to match HQ camera sensor (4056x3040)
     default_settings = {
         'brightness': 0,            # FIXED: GUI scale (-50 to +50, 0 = neutral)
         'contrast': 50,
@@ -152,8 +153,8 @@ def load_device_settings(device_name):
         'crop_enabled': False,
         'crop_x': 0,
         'crop_y': 0,
-        'crop_width': 4608,
-        'crop_height': 2592,
+        'crop_width': 4056,         # FIXED: 4:3 sensor width (was 4608 = 16:9 WRONG!)
+        'crop_height': 3040,        # FIXED: 4:3 sensor height (was 2592 = 16:9 WRONG!)
         'flip_horizontal': False,
         'flip_vertical': False,
         'grayscale': False,
@@ -213,6 +214,8 @@ def save_device_settings(device_name, settings):
 
 def apply_frame_transforms(image_array, device_name):
     """Apply ONLY frame transforms - never affects camera hardware"""
+    global _transform_logged  # Track if we've logged transform state
+    
     try:
         settings = load_device_settings(device_name)
         
@@ -220,7 +223,20 @@ def apply_frame_transforms(image_array, device_name):
         # GUI expects RGB data, so red objects appear red (not blue)
         image = image_array.copy()
         
-        logging.info(f"[TRANSFORM] {device_name}: Processing in RGB format for correct colors")
+        # LOG ONCE: Show transform state on first frame (not every frame!)
+        if not hasattr(apply_frame_transforms, '_logged_devices'):
+            apply_frame_transforms._logged_devices = set()
+        
+        if device_name not in apply_frame_transforms._logged_devices:
+            apply_frame_transforms._logged_devices.add(device_name)
+            logging.info(f"[TRANSFORM] {device_name}: Transform state on startup:")
+            logging.info(f"[TRANSFORM]   - Input frame: {image_array.shape[1]}x{image_array.shape[0]}")
+            logging.info(f"[TRANSFORM]   - crop_enabled: {settings.get('crop_enabled', False)}")
+            if settings.get('crop_enabled', False):
+                logging.info(f"[TRANSFORM]   - crop region: x={settings.get('crop_x')}, y={settings.get('crop_y')}, w={settings.get('crop_width')}, h={settings.get('crop_height')}")
+            logging.info(f"[TRANSFORM]   - rotation: {settings.get('rotation', 0)}°")
+            logging.info(f"[TRANSFORM]   - flip_h: {settings.get('flip_horizontal', False)}, flip_v: {settings.get('flip_vertical', False)}")
+            logging.info(f"[TRANSFORM]   - grayscale: {settings.get('grayscale', False)}")
         
         # Apply transforms in order: crop -> rotation -> flips -> grayscale
         
@@ -261,7 +277,16 @@ def apply_frame_transforms(image_array, device_name):
                 gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
                 image = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
         
-        logging.info(f"[TRANSFORM] {device_name}: ✅ RGB format preserved - red will appear RED")
+        # LOG ONCE: Output frame dimensions (only on first frame per device)
+        if device_name in apply_frame_transforms._logged_devices and \
+           not hasattr(apply_frame_transforms, '_output_logged'):
+            apply_frame_transforms._output_logged = set()
+        if not hasattr(apply_frame_transforms, '_output_logged'):
+            apply_frame_transforms._output_logged = set()
+        if device_name not in apply_frame_transforms._output_logged:
+            apply_frame_transforms._output_logged.add(device_name)
+            logging.info(f"[TRANSFORM] {device_name}: Output frame {image.shape[1]}x{image.shape[0]} (RGB preserved)")
+        
         return image
         
     except Exception as e:
