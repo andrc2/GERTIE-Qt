@@ -27,7 +27,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 try:
     import sys
     import os
-    sys.path.insert(0, "/home/andrc1/camera_system_integrated_final")
+    sys.path.insert(0, "/home/andrc1/camera_system_qt_conversion")
     
     from shared.config import MASTER_IP, VIDEO_PORT, get_slave_ports, HEARTBEAT_PORT
     logging.info("✅ Successfully imported from shared.config")
@@ -209,7 +209,7 @@ def get_device_name_from_ip():
 
 def load_device_settings(device_name):
     """Load settings from correct device-specific file"""
-    settings_file = f"/home/andrc1/camera_system_integrated_final/{device_name}_settings.json"
+    settings_file = f"/home/andrc1/camera_system_qt_conversion/{device_name}_settings.json"
     
     # FIXED: Default settings with correct brightness and transform values
     default_settings = {

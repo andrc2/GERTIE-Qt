@@ -27,7 +27,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 try:
     import sys
     import os
-    sys.path.insert(0, "/home/andrc1/camera_system_integrated_final")
+    sys.path.insert(0, "/home/andrc1/camera_system_qt_conversion")
     
     from shared.config import MASTER_IP, VIDEO_PORT, get_slave_ports, HEARTBEAT_PORT
     logging.info("✅ Successfully imported from shared.config")
@@ -137,7 +137,7 @@ def get_device_name_from_ip():
 
 def load_device_settings(device_name):
     """Load settings from correct device-specific file - FIXED BRIGHTNESS SCALE"""
-    settings_file = f"/home/andrc1/camera_system_integrated_final/{device_name}_settings.json"
+    settings_file = f"/home/andrc1/camera_system_qt_conversion/{device_name}_settings.json"
     
     # FIXED: Default settings with correct GUI brightness scale
     # FIXED: Crop defaults now use 4:3 to match HQ camera sensor (4056x3040)
@@ -194,7 +194,7 @@ def load_device_settings(device_name):
 def save_device_settings(device_name, settings):
     """Save settings to correct device-specific file"""
     try:
-        settings_file = f"/home/andrc1/camera_system_integrated_final/{device_name}_settings.json"
+        settings_file = f"/home/andrc1/camera_system_qt_conversion/{device_name}_settings.json"
         temp_file = f"{settings_file}.tmp"
         
         # Note: brightness=0 is valid (neutral on GUI scale -50 to +50)

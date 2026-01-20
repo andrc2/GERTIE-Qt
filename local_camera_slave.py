@@ -56,7 +56,7 @@ except ImportError as e:
     LOCAL_STILL_PORT = 6010
     LOCAL_HEARTBEAT_PORT = 5013
     LOCAL_IMAGE_DIR = "captured_images_local"
-    IMAGE_DIR = "/home/andrc1/camera_system_integrated_final/captured_images"
+    IMAGE_DIR = "/home/andrc1/camera_system_qt_conversion/captured_images"
     VIDEO_PORT = 5002
     STILL_PORT = 6000
     HEARTBEAT_PORT = 5003

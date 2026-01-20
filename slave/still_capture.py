@@ -43,18 +43,9 @@ except ImportError as e:
             return {"control": 5001, "video": 5002, "video_control": 5004, "still": 6000, "heartbeat": 5003}
     
     logging.info("Using fallback configuration")
-# Import from config
-try:
-    from shared.config import MASTER_IP, CONTROL_PORT, STILL_PORT, HEARTBEAT_PORT, get_slave_ports
-except ImportError:
-    # Fallback if config import fails
-    MASTER_IP = "192.168.0.200"
-    CONTROL_PORT = 5001
-    STILL_PORT = 6000
-    HEARTBEAT_PORT = 5003
 
-# Directories - Fixed for Pi environment
-SAVE_DIR = "/home/andrc1/camera_system_integrated_final/captured_images"
+# Directories - Fixed for Pi environment (Qt conversion)
+SAVE_DIR = "/home/andrc1/camera_system_qt_conversion/captured_images"
 
 # Feature flags
 FEATURE_FLAGS = {
@@ -936,7 +927,7 @@ def factory_reset():
     
     # Clear any cached settings files (legacy cleanup)
     try:
-        settings_cache_dir = "/home/andrc1/camera_system_integrated_final/config_files"
+        settings_cache_dir = "/home/andrc1/camera_system_qt_conversion/config_files"
         cache_file = os.path.join(settings_cache_dir, f"{device_name}_settings.json")
         if os.path.exists(cache_file):
             os.remove(cache_file)
@@ -975,7 +966,7 @@ def save_settings():
         return
         
     try:
-        settings_dir = "/home/andrc1/camera_system_integrated_final/config_files"
+        settings_dir = "/home/andrc1/camera_system_qt_conversion/config_files"
         os.makedirs(settings_dir, exist_ok=True)
         
         settings_file = os.path.join(settings_dir, f"{get_device_name()}_settings.json")
@@ -994,7 +985,7 @@ def load_settings():
         return
         
     try:
-        settings_dir = "/home/andrc1/camera_system_integrated_final/config_files"
+        settings_dir = "/home/andrc1/camera_system_qt_conversion/config_files"
         settings_file = os.path.join(settings_dir, f"{get_device_name()}_settings.json")
         
         if os.path.exists(settings_file):
@@ -1033,7 +1024,7 @@ def factory_reset_with_video_forward():
     
     # Clear any cached settings files (legacy cleanup)
     try:
-        settings_cache_dir = "/home/andrc1/camera_system_integrated_final/config_files"
+        settings_cache_dir = "/home/andrc1/camera_system_qt_conversion/config_files"
         cache_file = os.path.join(settings_cache_dir, f"{device_name}_settings.json")
         if os.path.exists(cache_file):
             os.remove(cache_file)

@@ -1,14 +1,21 @@
 [Unit]
 Description=GERTIE Qt Still Capture Service
-After=network.target
+After=network.target gertie-video.service
+Requires=gertie-video.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User=andrc1
-WorkingDirectory=/home/andrc1/camera_system_qt_conversion/slave
+Group=andrc1
+WorkingDirectory=/home/andrc1/camera_system_qt_conversion
+ExecStartPre=/bin/sleep 5
 ExecStart=/usr/bin/python3 /home/andrc1/camera_system_qt_conversion/slave/still_capture.py
 Restart=always
 RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONPATH=/home/andrc1/camera_system_qt_conversion
 Environment=DISPLAY=:0
 
 [Install]

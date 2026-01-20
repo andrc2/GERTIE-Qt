@@ -5,10 +5,14 @@ After=network.target
 [Service]
 Type=simple
 User=andrc1
-WorkingDirectory=/home/andrc1/camera_system_qt_conversion/slave
+Group=andrc1
+WorkingDirectory=/home/andrc1/camera_system_qt_conversion
 ExecStart=/usr/bin/python3 /home/andrc1/camera_system_qt_conversion/slave/video_stream.py
 Restart=always
 RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONPATH=/home/andrc1/camera_system_qt_conversion
 Environment=DISPLAY=:0
 
 [Install]
