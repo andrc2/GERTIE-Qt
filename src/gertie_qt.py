@@ -191,6 +191,7 @@ class MainWindow(QMainWindow):
         # Exclusive mode (single camera enlarged view)
         self.exclusive_camera = None  # Camera ID (1-8) when in exclusive mode, None for normal view
         self._last_exclusive_switch = 0  # Timestamp for debouncing rapid switches
+        self._hd_cameras = set()  # Track cameras switched to HD (need reset on exit)
         
         # Capture queue tracking (no cooldown - uses adaptive chunk sizing instead)
         self.pending_hires_count = 0  # Number of hi-res images pending
@@ -639,6 +640,7 @@ class MainWindow(QMainWindow):
                     EXCLUSIVE_RESOLUTION[1], 
                     camera_id
                 )
+                self._hd_cameras.add(camera_id)  # Track for reset later
             
             # Configure all widgets for exclusive/normal mode
             for i, widget in enumerate(self.camera_widgets):
@@ -672,17 +674,18 @@ class MainWindow(QMainWindow):
         
         print("🔲 Showing all cameras in normal grid")
         
-        # Reset resolution for the camera that was in exclusive mode
-        if ENABLE_RESOLUTION_SWITCHING and self.exclusive_camera:
-            camera_id = self.exclusive_camera
-            widget = self.camera_widgets[camera_id - 1]
-            print(f"📐 Resetting to normal resolution ({NORMAL_RESOLUTION[0]}x{NORMAL_RESOLUTION[1]}) for camera {camera_id}")
-            self.network_manager.send_set_resolution(
-                widget.ip,
-                NORMAL_RESOLUTION[0],
-                NORMAL_RESOLUTION[1],
-                camera_id
-            )
+        # Reset resolution for ALL cameras that were set to HD (not just current one!)
+        if ENABLE_RESOLUTION_SWITCHING and self._hd_cameras:
+            print(f"📐 Resetting {len(self._hd_cameras)} cameras to normal resolution ({NORMAL_RESOLUTION[0]}x{NORMAL_RESOLUTION[1]})")
+            for camera_id in self._hd_cameras:
+                widget = self.camera_widgets[camera_id - 1]
+                self.network_manager.send_set_resolution(
+                    widget.ip,
+                    NORMAL_RESOLUTION[0],
+                    NORMAL_RESOLUTION[1],
+                    camera_id
+                )
+            self._hd_cameras.clear()  # All reset, clear tracking
         
         self.exclusive_camera = None
         
