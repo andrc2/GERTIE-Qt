@@ -33,7 +33,7 @@ from config import get_ip_from_camera_id, SLAVES
 # Higher resolution in exclusive mode allows better focus checking
 NORMAL_RESOLUTION = (640, 480)    # 4:3 - efficient for 8-camera grid
 EXCLUSIVE_RESOLUTION = (1280, 720)  # 16:9 HD - better for focus checking
-ENABLE_RESOLUTION_SWITCHING = True  # Request HD in exclusive mode for focus checking
+ENABLE_RESOLUTION_SWITCHING = False  # DISABLED: Causes GUI freeze with rapid switching. Aspect ratio fix is sufficient.
 
 
 class CameraWidget(QWidget):
@@ -130,6 +130,7 @@ class CameraWidget(QWidget):
     def set_exclusive_mode(self, enabled: bool):
         """Enable/disable exclusive mode for proper aspect ratio handling"""
         self._exclusive_mode = enabled
+        self._last_label_size = None  # Force recalculation on mode change
         # Force refresh of current frame with new scaling
         if self._current_pixmap and not self._current_pixmap.isNull():
             self.update_frame(self._current_pixmap)
@@ -137,8 +138,8 @@ class CameraWidget(QWidget):
     def update_frame(self, pixmap: QPixmap):
         """Update video frame with proper aspect ratio scaling
         
-        In exclusive mode: Scale to fit label while preserving aspect ratio
-        In normal mode: Scale to fit (efficient for 8-camera grid)
+        PERFORMANCE: Uses FastTransformation always to avoid GUI freeze.
+        Only recalculates scale when label size changes.
         """
         if pixmap and not pixmap.isNull():
             self._current_pixmap = pixmap  # Cache for resize events
@@ -146,23 +147,14 @@ class CameraWidget(QWidget):
             # Get label size for scaling
             label_size = self.video_label.size()
             
-            if self._exclusive_mode:
-                # Exclusive mode: preserve aspect ratio for focus checking
-                # Use smooth scaling for better quality when enlarged
-                scaled = pixmap.scaled(
-                    label_size,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                self.video_label.setPixmap(scaled)
-            else:
-                # Normal mode: scale to fit (slightly faster, acceptable for small thumbnails)
-                scaled = pixmap.scaled(
-                    label_size,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.FastTransformation
-                )
-                self.video_label.setPixmap(scaled)
+            # PERFORMANCE: Always use FastTransformation to prevent GUI freeze
+            # SmoothTransformation was causing freezes with rapid camera switching
+            scaled = pixmap.scaled(
+                label_size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation
+            )
+            self.video_label.setPixmap(scaled)
 
 
 class MainWindow(QMainWindow):
@@ -199,6 +191,7 @@ class MainWindow(QMainWindow):
         
         # Exclusive mode (single camera enlarged view)
         self.exclusive_camera = None  # Camera ID (1-8) when in exclusive mode, None for normal view
+        self._last_exclusive_switch = 0  # Timestamp for debouncing rapid switches
         
         # Capture queue tracking (no cooldown - uses adaptive chunk sizing instead)
         self.pending_hires_count = 0  # Number of hi-res images pending
@@ -611,6 +604,12 @@ class MainWindow(QMainWindow):
         """
         if camera_id < 1 or camera_id > 8:
             return
+        
+        # DEBOUNCE: Prevent rapid switching (300ms cooldown)
+        current_time = time.time()
+        if current_time - self._last_exclusive_switch < 0.3:
+            return  # Ignore rapid keypresses
+        self._last_exclusive_switch = current_time
         
         if self.exclusive_camera == camera_id:
             # Already showing this camera exclusively - return to normal view
