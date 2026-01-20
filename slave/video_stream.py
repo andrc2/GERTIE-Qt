@@ -704,8 +704,8 @@ def handle_factory_reset_fixed(device_name):
             'crop_enabled': False,
             'crop_x': 0,
             'crop_y': 0,
-            'crop_width': 4608,
-            'crop_height': 2592,
+            'crop_width': 4056,         # 4:3 sensor width (NOT 4608 which is 16:9!)
+            'crop_height': 3040,        # 4:3 sensor height (NOT 2592 which is 16:9!)
             'flip_horizontal': False,
             'flip_vertical': False,
             'grayscale': False,

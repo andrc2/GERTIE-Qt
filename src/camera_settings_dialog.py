@@ -169,31 +169,31 @@ class CameraSettingsDialog(QDialog):
         self.crop_enabled_checkbox.setStyleSheet("color: white; font-weight: bold;")
         crop_layout.addWidget(self.crop_enabled_checkbox)
         
-        # Crop Coordinates
+        # Crop Coordinates - use 4:3 HQ camera sensor dimensions (4056x3040)
         crop_coords_layout = QHBoxLayout()
         
         crop_coords_layout.addWidget(QLabel("X:"))
         self.crop_x_spin = QSpinBox()
-        self.crop_x_spin.setRange(0, 4608)
+        self.crop_x_spin.setRange(0, 4056)  # 4:3 sensor width
         self.crop_x_spin.setStyleSheet("background-color: #333; color: white;")
         crop_coords_layout.addWidget(self.crop_x_spin)
         
         crop_coords_layout.addWidget(QLabel("Y:"))
         self.crop_y_spin = QSpinBox()
-        self.crop_y_spin.setRange(0, 2592)
+        self.crop_y_spin.setRange(0, 3040)  # 4:3 sensor height
         self.crop_y_spin.setStyleSheet("background-color: #333; color: white;")
         crop_coords_layout.addWidget(self.crop_y_spin)
         
         crop_coords_layout.addWidget(QLabel("W:"))
         self.crop_w_spin = QSpinBox()
-        self.crop_w_spin.setRange(1, 4608)
+        self.crop_w_spin.setRange(1, 4056)  # 4:3 sensor width
         self.crop_w_spin.setValue(100)
         self.crop_w_spin.setStyleSheet("background-color: #333; color: white;")
         crop_coords_layout.addWidget(self.crop_w_spin)
         
         crop_coords_layout.addWidget(QLabel("H:"))
         self.crop_h_spin = QSpinBox()
-        self.crop_h_spin.setRange(1, 2592)
+        self.crop_h_spin.setRange(1, 3040)  # 4:3 sensor height
         self.crop_h_spin.setValue(100)
         self.crop_h_spin.setStyleSheet("background-color: #333; color: white;")
         crop_coords_layout.addWidget(self.crop_h_spin)

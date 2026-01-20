@@ -874,10 +874,11 @@ class NetworkManager(QObject):
         """Set video resolution for a camera and restart stream to apply
         
         Used for exclusive mode: higher resolution for focus checking
-        Common resolutions:
+        Common 4:3 resolutions (match HQ camera sensor):
         - 640x480 (default, 4:3) - good for 8-camera grid
-        - 1280x720 (HD, 16:9) - good for exclusive mode focus check
-        - 1920x1080 (FHD, 16:9) - maximum quality but may be slow
+        - 1280x960 (HD, 4:3) - good for exclusive mode focus check
+        - 2028x1520 (2K, 4:3) - higher quality, may be slower
+        NOTE: Avoid 16:9 resolutions (1280x720, 1920x1080) as they force sensor crop!
         """
         if camera_id == 0:
             camera_id = get_camera_id_from_ip(ip)

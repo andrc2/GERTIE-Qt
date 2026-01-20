@@ -2,7 +2,7 @@
 """
 COMPLETE FIXED Local Camera Slave Service for control1 (rep8)
 ✅ Fixed: Syntax errors removed
-✅ Fixed: High resolution stills (4608, 2592) 
+✅ Fixed: High resolution stills (4056x3040 - 4:3 full sensor) 
 ✅ Fixed: Correct color handling (RGB format for GUI)
 ✅ Fixed: Working transforms using shared.transforms system
 ✅ Fixed: Proper stop/capture/restart protocol
@@ -101,8 +101,8 @@ camera_settings = {
     'crop_enabled': False,
     'crop_x': 0,
     'crop_y': 0,
-    'crop_width': 4608,
-    'crop_height': 2592,
+    'crop_width': 4056,         # 4:3 sensor width (NOT 4608 which is 16:9!)
+    'crop_height': 3040,        # 4:3 sensor height (NOT 2592 which is 16:9!)
     'flip_horizontal': False,
     'flip_vertical': False,
     'grayscale': False,
@@ -244,14 +244,14 @@ def start_local_video_stream():
         logging.info("Initializing camera...")
         picam2 = Picamera2()
         
-        # WYSIWYG FIX: Use raw (sensor) config to force full sensor usage
-        # Matches remote slaves (video_stream.py) - prevents center crop
+        # WYSIWYG FIX v3: Let camera auto-select appropriate 4:3 sensor mode
+        # IMPORTANT: Do NOT specify raw size! 4608x2592 was WRONG (16:9 binned mode)
+        # By omitting raw, camera selects optimal 4:3 mode for requested output
         video_config = picam2.create_video_configuration(
             main={"size": (640, 480), "format": "RGB888"},
-            raw={"size": (4608, 2592)},  # Force full HQ sensor - prevents center crop
             controls={"FrameRate": 15}
         )
-        logging.info("[LOCAL] WYSIWYG: Using full sensor (4608x2592) → scaled to (640, 480)")
+        logging.info("[LOCAL] WYSIWYG v3: Auto sensor mode for 640x480 (4:3 preserved, no crop)")
         picam2.configure(video_config)
         picam2.start()
         
@@ -467,18 +467,19 @@ def capture_local_still():
     return result
 
 def capture_local_image_high_resolution():
-    """FIXED: Capture HIGH RESOLUTION still image (4608, 2592) with working transforms"""
+    """FIXED: Capture HIGH RESOLUTION still image (4056x3040 - 4:3) with working transforms"""
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"/tmp/local_capture_{timestamp}.jpg"
     
     try:
-        logging.info("[LOCAL] Starting HIGH-RESOLUTION still capture (4608x2592)...")
+        logging.info("[LOCAL] Starting HIGH-RESOLUTION still capture (4056x3040 - 4:3)...")
         
         picam2 = Picamera2()
         
-        # HIGH RESOLUTION configuration (FIXED from working version)
+        # HIGH RESOLUTION configuration - use 4:3 full sensor
+        # FIXED: 4056x3040 (4:3) NOT 4608x2592 (16:9 cropped mode!)
         still_config = picam2.create_still_configuration(
-            main={"size": (4608, 2592)}  # ✅ FULL SENSOR RESOLUTION
+            main={"size": (4056, 3040)}  # ✅ FULL 4:3 SENSOR RESOLUTION
         )
         
         picam2.configure(still_config)
@@ -524,7 +525,7 @@ def capture_local_image_high_resolution():
         
         if success and os.path.exists(filename):
             file_size = os.path.getsize(filename)
-            logging.info(f"[LOCAL] ✅ HIGH-RES CAPTURED: {filename} ({file_size} bytes, resolution: 4608x2592)")
+            logging.info(f"[LOCAL] ✅ HIGH-RES CAPTURED: {filename} ({file_size} bytes, resolution: 4056x3040)")
             
             # Verify this is actually high resolution
             if file_size > 1000000:  # Should be >1MB for high-res
@@ -965,7 +966,7 @@ def initialize_local_settings():
 def main():
     """Main function with enhanced startup"""
     logging.info("[LOCAL] Starting COMPLETE FIXED local camera service...")
-    logging.info(f"[LOCAL] ✅ HIGH RESOLUTION: 4608x2592 still captures")
+    logging.info(f"[LOCAL] ✅ HIGH RESOLUTION: 4056x3040 (4:3) still captures")
     logging.info(f"[LOCAL] ✅ WORKING TRANSFORMS: Using shared.transforms system")
     logging.info(f"[LOCAL] ✅ CORRECT COLORS: RGB format for GUI")
     logging.info(f"[LOCAL] ✅ PROPER PROTOCOL: Stop→Capture→Upload→Restart")
