@@ -33,7 +33,7 @@ from config import get_ip_from_camera_id, SLAVES
 # Higher resolution in exclusive mode allows better focus checking
 NORMAL_RESOLUTION = (640, 480)    # 4:3 - efficient for 8-camera grid
 EXCLUSIVE_RESOLUTION = (1280, 720)  # 16:9 HD - better for focus checking
-ENABLE_RESOLUTION_SWITCHING = False  # DISABLED: Causes GUI freeze with rapid switching. Aspect ratio fix is sufficient.
+ENABLE_RESOLUTION_SWITCHING = True  # Re-enabled: GUI freeze was from decode-on-signal, not resolution switching
 
 
 class CameraWidget(QWidget):
@@ -131,9 +131,8 @@ class CameraWidget(QWidget):
         """Enable/disable exclusive mode for proper aspect ratio handling"""
         self._exclusive_mode = enabled
         self._last_label_size = None  # Force recalculation on mode change
-        # Force refresh of current frame with new scaling
-        if self._current_pixmap and not self._current_pixmap.isNull():
-            self.update_frame(self._current_pixmap)
+        # Don't call update_frame here - the layout hasn't processed yet!
+        # The display timer will update with correct size on next tick (50ms)
     
     def update_frame(self, pixmap: QPixmap):
         """Update video frame with proper aspect ratio scaling
@@ -656,6 +655,9 @@ class MainWindow(QMainWindow):
                     widget.set_exclusive_mode(False)
                     widget.hide()
             
+            # Force redraw after layout processes (100ms delay)
+            QTimer.singleShot(100, lambda: self._force_redraw_camera(camera_id))
+            
             self.status_bar.showMessage(f"Camera {camera_id} - Focus Check Mode (Escape to exit)", 3000)
     
     def _show_all_cameras(self):
@@ -694,7 +696,22 @@ class MainWindow(QMainWindow):
             self.camera_grid.addWidget(widget, i // 4, i % 4)
             widget.show()
         
+        # Force redraw all cameras after layout processes (100ms delay)
+        QTimer.singleShot(100, self._force_redraw_all_cameras)
+        
         self.status_bar.showMessage("All cameras", 2000)
+    
+    def _force_redraw_camera(self, camera_id: int):
+        """Force redraw a specific camera with current frame at new size"""
+        if camera_id in self.decoded_frames:
+            widget = self.camera_widgets[camera_id - 1]
+            widget.update_frame(self.decoded_frames[camera_id])
+    
+    def _force_redraw_all_cameras(self):
+        """Force redraw all cameras with current frames at new sizes"""
+        for camera_id, pixmap in self.decoded_frames.items():
+            widget = self.camera_widgets[camera_id - 1]
+            widget.update_frame(pixmap)
     
     def _restart_all_streams(self):
         """Restart video streams on all cameras
