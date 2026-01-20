@@ -870,6 +870,38 @@ class NetworkManager(QObject):
         for name, config in SLAVES.items():
             self.send_stop_stream(config["ip"])
     
+    def send_set_resolution(self, ip: str, width: int, height: int, camera_id: int = 0):
+        """Set video resolution for a camera and restart stream to apply
+        
+        Used for exclusive mode: higher resolution for focus checking
+        Common resolutions:
+        - 640x480 (default, 4:3) - good for 8-camera grid
+        - 1280x720 (HD, 16:9) - good for exclusive mode focus check
+        - 1920x1080 (FHD, 16:9) - maximum quality but may be slow
+        """
+        if camera_id == 0:
+            camera_id = get_camera_id_from_ip(ip)
+        
+        resolution_str = f"{width}x{height}"
+        settings = {"resolution": resolution_str}
+        settings_json = json.dumps(settings)
+        command_str = f"SET_ALL_SETTINGS_{settings_json}"
+        
+        ports = get_slave_ports(ip)
+        command = NetworkCommand(
+            ip=ip,
+            command=command_str,
+            port=ports['video_control'],  # Use video_control port for video settings
+            command_type=CommandType.SETTINGS,
+            priority=CommandPriority.HIGH,  # High priority for responsiveness
+            camera_id=camera_id
+        )
+        self.worker.add_command(command)
+        logger.info(f"[MANAGER] Queued SET_RESOLUTION {resolution_str} for camera {camera_id}")
+        
+        # Queue restart to apply the new resolution
+        self.send_restart_stream(ip, camera_id)
+    
 
     # =========================================================================
     # SETTINGS COMMANDS

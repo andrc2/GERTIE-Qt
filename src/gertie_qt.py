@@ -29,6 +29,12 @@ from gallery_panel import GalleryPanel
 from camera_settings_dialog import CameraSettingsDialog
 from config import get_ip_from_camera_id, SLAVES
 
+# Resolution settings for exclusive mode
+# Higher resolution in exclusive mode allows better focus checking
+NORMAL_RESOLUTION = (640, 480)    # 4:3 - efficient for 8-camera grid
+EXCLUSIVE_RESOLUTION = (1280, 720)  # 16:9 HD - better for focus checking
+ENABLE_RESOLUTION_SWITCHING = False  # Disabled: may cause stream interruption. Aspect ratio fix alone improves quality.
+
 
 class CameraWidget(QWidget):
     """Widget representing a single camera with video feed and controls"""
@@ -42,6 +48,7 @@ class CameraWidget(QWidget):
         self.ip = get_ip_from_camera_id(camera_id)  # Use config for correct IP
         self._last_size = None  # Cache for resize detection
         self._current_pixmap = None  # Cache current frame
+        self._exclusive_mode = False  # Exclusive mode flag for proper scaling
         
         self._setup_ui()
     
@@ -52,7 +59,7 @@ class CameraWidget(QWidget):
         layout.setSpacing(2)
         self.setLayout(layout)
         
-        # Video display - use setScaledContents for efficiency
+        # Video display - scaling handled in update_frame based on mode
         self.video_label = QLabel()
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.video_label.setStyleSheet("""
@@ -62,7 +69,9 @@ class CameraWidget(QWidget):
             }
         """)
         self.video_label.setMinimumSize(200, 150)
-        self.video_label.setScaledContents(True)  # Let Qt handle scaling efficiently
+        # NOTE: setScaledContents disabled - we handle scaling in update_frame()
+        # This allows proper aspect ratio preservation in exclusive mode
+        self.video_label.setScaledContents(False)
         self.video_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         layout.addWidget(self.video_label, 1)  # stretch factor
         
@@ -118,11 +127,42 @@ class CameraWidget(QWidget):
     def _on_settings(self):
         self.settings_requested.emit(self.camera_id, self.ip)
     
+    def set_exclusive_mode(self, enabled: bool):
+        """Enable/disable exclusive mode for proper aspect ratio handling"""
+        self._exclusive_mode = enabled
+        # Force refresh of current frame with new scaling
+        if self._current_pixmap and not self._current_pixmap.isNull():
+            self.update_frame(self._current_pixmap)
+    
     def update_frame(self, pixmap: QPixmap):
-        """Update video frame - simple and efficient"""
+        """Update video frame with proper aspect ratio scaling
+        
+        In exclusive mode: Scale to fit label while preserving aspect ratio
+        In normal mode: Scale to fit (efficient for 8-camera grid)
+        """
         if pixmap and not pixmap.isNull():
-            # Direct setPixmap - Qt's setScaledContents handles scaling efficiently
-            self.video_label.setPixmap(pixmap)
+            self._current_pixmap = pixmap  # Cache for resize events
+            
+            # Get label size for scaling
+            label_size = self.video_label.size()
+            
+            if self._exclusive_mode:
+                # Exclusive mode: preserve aspect ratio for focus checking
+                # Use smooth scaling for better quality when enlarged
+                scaled = pixmap.scaled(
+                    label_size,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.video_label.setPixmap(scaled)
+            else:
+                # Normal mode: scale to fit (slightly faster, acceptable for small thumbnails)
+                scaled = pixmap.scaled(
+                    label_size,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.FastTransformation
+                )
+                self.video_label.setPixmap(scaled)
 
 
 class MainWindow(QMainWindow):
@@ -564,6 +604,10 @@ class MainWindow(QMainWindow):
         Matches Tkinter behavior:
         - If clicking the same camera that's already exclusive, return to normal view
         - Otherwise, enter exclusive mode showing only that camera enlarged
+        
+        In exclusive mode:
+        - Requests higher resolution from camera for focus checking
+        - Uses proper aspect ratio scaling (no distortion)
         """
         if camera_id < 1 or camera_id > 8:
             return
@@ -577,19 +621,33 @@ class MainWindow(QMainWindow):
             print(f"🔳 Entering exclusive mode for camera {camera_id}")
             self.exclusive_camera = camera_id
             
-            # Hide all cameras except the selected one
+            # Request higher resolution for focus checking
+            if ENABLE_RESOLUTION_SWITCHING:
+                widget = self.camera_widgets[camera_id - 1]
+                print(f"📐 Requesting HD resolution ({EXCLUSIVE_RESOLUTION[0]}x{EXCLUSIVE_RESOLUTION[1]}) for camera {camera_id}")
+                self.network_manager.send_set_resolution(
+                    widget.ip, 
+                    EXCLUSIVE_RESOLUTION[0], 
+                    EXCLUSIVE_RESOLUTION[1], 
+                    camera_id
+                )
+            
+            # Configure all widgets for exclusive/normal mode
             for i, widget in enumerate(self.camera_widgets):
                 widget_camera_id = i + 1
                 if widget_camera_id == camera_id:
-                    # Show selected camera enlarged (span full grid)
+                    # Enable exclusive mode for selected camera (proper aspect ratio scaling)
+                    widget.set_exclusive_mode(True)
                     widget.show()
                     # Remove from current position and re-add spanning multiple cells
                     self.camera_grid.removeWidget(widget)
                     self.camera_grid.addWidget(widget, 0, 0, 2, 4)  # row, col, rowspan, colspan
                 else:
+                    # Disable exclusive mode and hide other cameras
+                    widget.set_exclusive_mode(False)
                     widget.hide()
             
-            self.status_bar.showMessage(f"Camera {camera_id} (Press Escape or {camera_id} to exit)", 3000)
+            self.status_bar.showMessage(f"Camera {camera_id} - Focus Check Mode (Escape to exit)", 3000)
     
     def _show_all_cameras(self):
         """Return to normal view showing all 8 cameras in 2x4 grid
@@ -602,10 +660,25 @@ class MainWindow(QMainWindow):
             return  # Already in normal view
         
         print("🔲 Showing all cameras in normal grid")
+        
+        # Reset resolution for the camera that was in exclusive mode
+        if ENABLE_RESOLUTION_SWITCHING and self.exclusive_camera:
+            camera_id = self.exclusive_camera
+            widget = self.camera_widgets[camera_id - 1]
+            print(f"📐 Resetting to normal resolution ({NORMAL_RESOLUTION[0]}x{NORMAL_RESOLUTION[1]}) for camera {camera_id}")
+            self.network_manager.send_set_resolution(
+                widget.ip,
+                NORMAL_RESOLUTION[0],
+                NORMAL_RESOLUTION[1],
+                camera_id
+            )
+        
         self.exclusive_camera = None
         
         # Restore all cameras to their normal grid positions (2x4)
         for i, widget in enumerate(self.camera_widgets):
+            # Disable exclusive mode (return to normal fast scaling)
+            widget.set_exclusive_mode(False)
             # Remove from current position first
             self.camera_grid.removeWidget(widget)
             # Re-add at normal position: row = i // 4, col = i % 4
