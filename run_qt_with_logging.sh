@@ -62,16 +62,17 @@ log_both ""
 # Capture system state
 log_both "[$TIMESTAMP] [INFO] System state before Qt GUI launch:"
 
-# Check slave services (gertie-slave.service for Qt)
+# Check slave services (BOTH gertie-video AND gertie-capture for Qt)
 log_both "[$TIMESTAMP] [INFO] Checking slave services..."
 for ip in 201 202 203 204 205 206 207; do
-    status=$(ssh -o ConnectTimeout=2 andrc1@192.168.0.$ip "systemctl is-active gertie-slave.service" 2>/dev/null || echo "unreachable")
-    log_both "[$TIMESTAMP] [INFO] rep$((ip - 200)) (192.168.0.$ip): $status"
+    video_status=$(ssh -o ConnectTimeout=2 andrc1@192.168.0.$ip "systemctl is-active gertie-video.service" 2>/dev/null || echo "unreachable")
+    capture_status=$(ssh -o ConnectTimeout=2 andrc1@192.168.0.$ip "systemctl is-active gertie-capture.service" 2>/dev/null || echo "unreachable")
+    log_both "[$TIMESTAMP] [INFO] rep$((ip - 200)) (192.168.0.$ip): video=$video_status capture=$capture_status"
 done
 
-# Local rep8 (local_camera_slave.service on control1)
+# Local rep8 (local_camera_slave.service handles BOTH video+capture on control1)
 status=$(systemctl is-active local_camera_slave.service 2>/dev/null || echo "not running")
-log_both "[$TIMESTAMP] [INFO] rep8 (local): $status"
+log_both "[$TIMESTAMP] [INFO] rep8 (local): $status (combined video+capture)"
 
 # Network ports
 log_both "[$TIMESTAMP] [INFO] Network ports:"
