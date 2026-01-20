@@ -92,7 +92,25 @@ sync_to_remote() {
         log "WARN" "$slave_name: No settings files to clear or failed to clear them"
     fi
     
-    log "INFO" "$slave_name: Restarting services..."
+    # Stop old Tkinter services first (if running)
+    log "INFO" "$slave_name: Stopping old Tkinter services (if any)..."
+    ssh "$REMOTE_USER@$slave_ip" "sudo systemctl stop video_stream.service still_capture.service 2>/dev/null || true" 2>&1 | tee -a "$LOG_FILE"
+    ssh "$REMOTE_USER@$slave_ip" "sudo systemctl disable video_stream.service still_capture.service 2>/dev/null || true" 2>&1 | tee -a "$LOG_FILE"
+    
+    # Install Qt service files from codebase
+    log "INFO" "$slave_name: Installing Qt service files..."
+    if ssh "$REMOTE_USER@$slave_ip" "sudo cp $SOURCE_DIR/gertie-video.service /etc/systemd/system/ && sudo cp $SOURCE_DIR/gertie-capture.service /etc/systemd/system/" 2>&1 | tee -a "$LOG_FILE"; then
+        log "INFO" "$slave_name: Qt service files installed"
+    else
+        log "ERROR" "$slave_name: Failed to install Qt service files"
+    fi
+    
+    # Reload systemd and enable Qt services
+    log "INFO" "$slave_name: Reloading systemd and enabling Qt services..."
+    ssh "$REMOTE_USER@$slave_ip" "sudo systemctl daemon-reload" 2>&1 | tee -a "$LOG_FILE"
+    ssh "$REMOTE_USER@$slave_ip" "sudo systemctl enable gertie-video.service gertie-capture.service" 2>&1 | tee -a "$LOG_FILE"
+    
+    log "INFO" "$slave_name: Restarting Qt services..."
     
     # Restart Qt services (gertie-video and gertie-capture)
     if ssh "$REMOTE_USER@$slave_ip" "sudo systemctl restart gertie-video.service" 2>&1 | tee -a "$LOG_FILE"; then
@@ -111,6 +129,10 @@ sync_to_remote() {
     # Check service status
     log "INFO" "$slave_name: Checking service status..."
     ssh "$REMOTE_USER@$slave_ip" "systemctl status gertie-video.service gertie-capture.service --no-pager" 2>&1 | tee -a "$LOG_FILE"
+    
+    # Verify services are running Qt code (not Tkinter)
+    log "INFO" "$slave_name: Verifying Qt code path..."
+    ssh "$REMOTE_USER@$slave_ip" "ps aux | grep -E 'video_stream|still_capture' | grep -v grep" 2>&1 | tee -a "$LOG_FILE"
     
     # Check for errors in recent logs
     log "INFO" "$slave_name: Recent service logs (last 20 lines):"
