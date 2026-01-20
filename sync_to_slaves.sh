@@ -94,27 +94,27 @@ sync_to_remote() {
     
     log "INFO" "$slave_name: Restarting services..."
     
-    # Restart video_stream
-    if ssh "$REMOTE_USER@$slave_ip" "sudo systemctl restart video_stream.service" 2>&1 | tee -a "$LOG_FILE"; then
-        log "INFO" "$slave_name: video_stream.service restarted"
+    # Restart Qt services (gertie-video and gertie-capture)
+    if ssh "$REMOTE_USER@$slave_ip" "sudo systemctl restart gertie-video.service" 2>&1 | tee -a "$LOG_FILE"; then
+        log "INFO" "$slave_name: gertie-video.service restarted"
     else
-        log "ERROR" "$slave_name: Failed to restart video_stream.service"
+        log "ERROR" "$slave_name: Failed to restart gertie-video.service"
     fi
     
     # Restart still_capture
-    if ssh "$REMOTE_USER@$slave_ip" "sudo systemctl restart still_capture.service" 2>&1 | tee -a "$LOG_FILE"; then
-        log "INFO" "$slave_name: still_capture.service restarted"
+    if ssh "$REMOTE_USER@$slave_ip" "sudo systemctl restart gertie-capture.service" 2>&1 | tee -a "$LOG_FILE"; then
+        log "INFO" "$slave_name: gertie-capture.service restarted"
     else
-        log "ERROR" "$slave_name: Failed to restart still_capture.service"
+        log "ERROR" "$slave_name: Failed to restart gertie-capture.service"
     fi
     
     # Check service status
     log "INFO" "$slave_name: Checking service status..."
-    ssh "$REMOTE_USER@$slave_ip" "systemctl status video_stream.service still_capture.service --no-pager" 2>&1 | tee -a "$LOG_FILE"
+    ssh "$REMOTE_USER@$slave_ip" "systemctl status gertie-video.service gertie-capture.service --no-pager" 2>&1 | tee -a "$LOG_FILE"
     
     # Check for errors in recent logs
     log "INFO" "$slave_name: Recent service logs (last 20 lines):"
-    ssh "$REMOTE_USER@$slave_ip" "journalctl -u video_stream.service -u still_capture.service -n 20 --no-pager" 2>&1 | tee -a "$LOG_FILE"
+    ssh "$REMOTE_USER@$slave_ip" "journalctl -u gertie-video.service -u gertie-capture.service -n 20 --no-pager" 2>&1 | tee -a "$LOG_FILE"
     
     log "INFO" "$slave_name: Deployment completed"
 }
