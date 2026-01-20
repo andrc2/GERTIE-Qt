@@ -121,8 +121,111 @@ log_both "======================================================================
 # Copy latest to archive
 cp "$LATEST_LOG" "$ARCHIVE_LOG"
 
+# ============================================
+# AUTOMATED LOG ANALYSIS - Troubleshooting Summary
+# ============================================
 echo ""
-echo "Logs saved to:"
-echo "  Latest:     $LATEST_LOG"
-echo "  Archive:    $ARCHIVE_LOG"
-echo "  Cumulative: $CUMULATIVE_LOG"
+echo "╔════════════════════════════════════════════════════════════════════╗"
+echo "║                    SESSION ANALYSIS REPORT                         ║"
+echo "╚════════════════════════════════════════════════════════════════════╝"
+echo ""
+
+# Count key events from this session's log
+ERRORS=$(grep -c "ERROR" "$LATEST_LOG" 2>/dev/null || echo "0")
+WARNINGS=$(grep -c "WARNING\|WARN" "$LATEST_LOG" 2>/dev/null || echo "0")
+CAPTURES=$(grep -c "CAPTURE" "$LATEST_LOG" 2>/dev/null || echo "0")
+RESOLUTION_CHANGES=$(grep -c "RESOLUTION" "$LATEST_LOG" 2>/dev/null || echo "0")
+EXCLUSIVE_EVENTS=$(grep -c "EXCLUSIVE\|exclusive" "$LATEST_LOG" 2>/dev/null || echo "0")
+DECODE_LOGS=$(grep -c "DECODE" "$LATEST_LOG" 2>/dev/null || echo "0")
+
+echo "📊 Event Summary:"
+echo "   Errors:              $ERRORS"
+echo "   Warnings:            $WARNINGS"
+echo "   Captures logged:     $CAPTURES"
+echo "   Resolution changes:  $RESOLUTION_CHANGES"
+echo "   Exclusive mode:      $EXCLUSIVE_EVENTS"
+echo "   Decode logs:         $DECODE_LOGS"
+echo ""
+
+# Show errors if any
+if [ "$ERRORS" -gt 0 ]; then
+    echo "❌ ERRORS FOUND:"
+    echo "────────────────────────────────────────"
+    grep "ERROR" "$LATEST_LOG" | tail -10
+    echo "────────────────────────────────────────"
+    echo ""
+fi
+
+# Show warnings if any
+if [ "$WARNINGS" -gt 0 ]; then
+    echo "⚠️  WARNINGS:"
+    echo "────────────────────────────────────────"
+    grep -E "WARNING|WARN" "$LATEST_LOG" | tail -10
+    echo "────────────────────────────────────────"
+    echo ""
+fi
+
+# Show resolution events
+if [ "$RESOLUTION_CHANGES" -gt 0 ]; then
+    echo "📐 RESOLUTION EVENTS:"
+    echo "────────────────────────────────────────"
+    grep "RESOLUTION" "$LATEST_LOG" | tail -10
+    echo "────────────────────────────────────────"
+    echo ""
+fi
+
+# Show capture events
+if [ "$CAPTURES" -gt 0 ]; then
+    echo "📷 CAPTURE EVENTS:"
+    echo "────────────────────────────────────────"
+    grep "CAPTURE" "$LATEST_LOG" | tail -10
+    echo "────────────────────────────────────────"
+    echo ""
+fi
+
+# Show decode logs (frame dimensions)
+if [ "$DECODE_LOGS" -gt 0 ]; then
+    echo "🖼️  FRAME DIMENSIONS (from DECODE logs):"
+    echo "────────────────────────────────────────"
+    grep "DECODE" "$LATEST_LOG" | tail -8
+    echo "────────────────────────────────────────"
+    echo ""
+fi
+
+# Show exclusive mode events
+if [ "$EXCLUSIVE_EVENTS" -gt 0 ]; then
+    echo "🔳 EXCLUSIVE MODE EVENTS:"
+    echo "────────────────────────────────────────"
+    grep -iE "EXCLUSIVE|exclusive" "$LATEST_LOG" | tail -8
+    echo "────────────────────────────────────────"
+    echo ""
+fi
+
+# FPS summary
+FPS_LINE=$(grep "FPS:" "$LATEST_LOG" | tail -1)
+if [ -n "$FPS_LINE" ]; then
+    echo "📈 Final Stats: $FPS_LINE"
+    echo ""
+fi
+
+# Session summary line
+SESSION_LINE=$(grep "Frames:" "$LATEST_LOG" | tail -1)
+if [ -n "$SESSION_LINE" ]; then
+    echo "📊 Session: $SESSION_LINE"
+    echo ""
+fi
+
+echo "╔════════════════════════════════════════════════════════════════════╗"
+echo "║                         LOG FILES                                  ║"
+echo "╠════════════════════════════════════════════════════════════════════╣"
+echo "║  Latest:     $LATEST_LOG"
+echo "║  Archive:    $ARCHIVE_LOG"
+echo "║  Cumulative: $CUMULATIVE_LOG"
+echo "╠════════════════════════════════════════════════════════════════════╣"
+echo "║  Quick commands:                                                   ║"
+echo "║    grep ERROR $LATEST_LOG"
+echo "║    grep RESOLUTION $LATEST_LOG"
+echo "║    grep CAPTURE $LATEST_LOG"
+echo "║    grep DECODE $LATEST_LOG"
+echo "╚════════════════════════════════════════════════════════════════════╝"
+echo ""

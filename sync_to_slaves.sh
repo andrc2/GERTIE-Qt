@@ -1,6 +1,7 @@
 #!/bin/bash
-# Deployment and Logging Script for GERTIE Camera System
-# Syncs code to all slaves and logs all system activity to /home/andrc1/Desktop/updatelog.txt
+# GERTIE Qt - Smart Deployment Script
+# Only syncs/restarts when necessary, checks service status first
+# Logs to /home/andrc1/Desktop/updatelog.txt
 
 set -e  # Exit on error
 
@@ -16,15 +17,21 @@ REMOTE_SLAVES=(
     "192.168.0.206"  # rep6
     "192.168.0.207"  # rep7
 )
-LOCAL_SLAVE="127.0.0.1"  # rep8 (local)
 SOURCE_DIR="/home/andrc1/camera_system_qt_conversion"
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+
+# Counters for summary
+SLAVES_SYNCED=0
+SLAVES_SKIPPED=0
+SLAVES_FAILED=0
+SERVICES_RESTARTED=0
 
 # Colors for terminal output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Logging function
@@ -32,196 +39,309 @@ log() {
     local level=$1
     shift
     local message="$@"
-    echo "[$TIMESTAMP] [$level] $message" | tee -a "$LOG_FILE"
+    local ts=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$ts] [$level] $message" | tee -a "$LOG_FILE"
 }
 
 log_section() {
     local section="$1"
     echo "" | tee -a "$LOG_FILE"
     echo "========================================" | tee -a "$LOG_FILE"
-    echo "[$TIMESTAMP] $section" | tee -a "$LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $section" | tee -a "$LOG_FILE"
     echo "========================================" | tee -a "$LOG_FILE"
 }
 
-# Start deployment
-log_section "DEPLOYMENT STARTED"
-log "INFO" "Sync script initiated from control1"
-log "INFO" "Source directory: $SOURCE_DIR"
-log "INFO" "Target slaves: ${REMOTE_SLAVES[@]} + local (rep8)"
+# Get local git commit hash
+get_local_commit() {
+    if [ -d "$SOURCE_DIR/.git" ]; then
+        cd "$SOURCE_DIR" && git rev-parse --short HEAD 2>/dev/null || echo "unknown"
+    else
+        # Use checksum of key files as fallback
+        md5sum "$SOURCE_DIR/slave/video_stream.py" "$SOURCE_DIR/slave/still_capture.py" 2>/dev/null | md5sum | cut -d' ' -f1 | cut -c1-8
+    fi
+}
 
-# Git information if available
-if [ -d "$SOURCE_DIR/.git" ]; then
-    BRANCH=$(cd "$SOURCE_DIR" && git branch --show-current 2>/dev/null || echo "unknown")
-    COMMIT=$(cd "$SOURCE_DIR" && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-    log "INFO" "Git branch: $BRANCH | Commit: $COMMIT"
-else
-    log "WARN" "Not a git repository"
-fi
+# Get remote file checksum
+get_remote_checksum() {
+    local ip=$1
+    ssh -o ConnectTimeout=3 "$REMOTE_USER@$ip" "md5sum $SOURCE_DIR/slave/video_stream.py $SOURCE_DIR/slave/still_capture.py 2>/dev/null | md5sum | cut -d' ' -f1 | cut -c1-8" 2>/dev/null || echo "none"
+}
 
-# Function to sync to remote slave
+# Check if Qt services are installed and running on remote slave
+check_remote_qt_services() {
+    local ip=$1
+    local video_active=$(ssh -o ConnectTimeout=3 "$REMOTE_USER@$ip" "systemctl is-active gertie-video.service 2>/dev/null" || echo "inactive")
+    local capture_active=$(ssh -o ConnectTimeout=3 "$REMOTE_USER@$ip" "systemctl is-active gertie-capture.service 2>/dev/null" || echo "inactive")
+    local video_enabled=$(ssh -o ConnectTimeout=3 "$REMOTE_USER@$ip" "systemctl is-enabled gertie-video.service 2>/dev/null" || echo "disabled")
+    local capture_enabled=$(ssh -o ConnectTimeout=3 "$REMOTE_USER@$ip" "systemctl is-enabled gertie-capture.service 2>/dev/null" || echo "disabled")
+    
+    # Check if running Qt code (not Tkinter)
+    local code_path=$(ssh -o ConnectTimeout=3 "$REMOTE_USER@$ip" "ps aux | grep video_stream.py | grep -v grep | head -1" 2>/dev/null || echo "")
+    local is_qt_code="no"
+    if echo "$code_path" | grep -q "camera_system_qt_conversion"; then
+        is_qt_code="yes"
+    fi
+    
+    echo "$video_active|$capture_active|$video_enabled|$capture_enabled|$is_qt_code"
+}
+
+# Check if old Tkinter services are running
+check_old_tkinter_services() {
+    local ip=$1
+    local video_old=$(ssh -o ConnectTimeout=3 "$REMOTE_USER@$ip" "systemctl is-active video_stream.service 2>/dev/null" || echo "inactive")
+    local capture_old=$(ssh -o ConnectTimeout=3 "$REMOTE_USER@$ip" "systemctl is-active still_capture.service 2>/dev/null" || echo "inactive")
+    
+    if [ "$video_old" = "active" ] || [ "$capture_old" = "active" ]; then
+        echo "running"
+    else
+        echo "stopped"
+    fi
+}
+
+# Install Qt services on remote slave (only if needed)
+install_qt_services() {
+    local ip=$1
+    local slave_name=$2
+    
+    log "INFO" "$slave_name: Installing Qt service files..."
+    ssh "$REMOTE_USER@$ip" "sudo cp $SOURCE_DIR/gertie-video.service /etc/systemd/system/ && sudo cp $SOURCE_DIR/gertie-capture.service /etc/systemd/system/" 2>&1 | tee -a "$LOG_FILE"
+    ssh "$REMOTE_USER@$ip" "sudo systemctl daemon-reload" 2>&1 | tee -a "$LOG_FILE"
+    ssh "$REMOTE_USER@$ip" "sudo systemctl enable gertie-video.service gertie-capture.service" 2>&1 | tee -a "$LOG_FILE"
+    log "INFO" "$slave_name: Qt services installed and enabled"
+}
+
+# Stop old Tkinter services
+stop_old_services() {
+    local ip=$1
+    local slave_name=$2
+    
+    log "INFO" "$slave_name: Stopping old Tkinter services..."
+    ssh "$REMOTE_USER@$ip" "sudo systemctl stop video_stream.service still_capture.service 2>/dev/null || true" 2>&1 | tee -a "$LOG_FILE"
+    ssh "$REMOTE_USER@$ip" "sudo systemctl disable video_stream.service still_capture.service 2>/dev/null || true" 2>&1 | tee -a "$LOG_FILE"
+}
+
+# Restart Qt services
+restart_qt_services() {
+    local ip=$1
+    local slave_name=$2
+    
+    log "INFO" "$slave_name: Restarting Qt services..."
+    ssh "$REMOTE_USER@$ip" "sudo systemctl restart gertie-video.service gertie-capture.service" 2>&1 | tee -a "$LOG_FILE"
+    ((SERVICES_RESTARTED+=2))
+}
+
+# Smart sync to remote slave
 sync_to_remote() {
     local slave_ip=$1
     local slave_name="rep$((${slave_ip##*.} - 200))"
+    local needs_sync=false
+    local needs_service_install=false
+    local needs_restart=false
     
-    log_section "SYNCING TO $slave_name ($slave_ip)"
+    echo -e "${CYAN}━━━ Checking $slave_name ($slave_ip) ━━━${NC}"
     
     # Test connectivity
     if ! ping -c 1 -W 2 "$slave_ip" &> /dev/null; then
+        echo -e "${RED}✗ $slave_name: Not reachable${NC}"
         log "ERROR" "$slave_name: Not reachable"
-        return 1
-    fi
-    log "INFO" "$slave_name: Connectivity OK"
-    
-    # Sync files
-    log "INFO" "$slave_name: Starting rsync..."
-    if rsync -avz --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' \
-        "$SOURCE_DIR/" "$REMOTE_USER@$slave_ip:$SOURCE_DIR/" 2>&1 | tee -a "$LOG_FILE"; then
-        log "INFO" "$slave_name: Rsync completed successfully"
-    else
-        log "ERROR" "$slave_name: Rsync failed"
+        ((SLAVES_FAILED++))
         return 1
     fi
     
-    # Restart services
-    log "INFO" "$slave_name: Clearing old settings files to force fresh initialization..."
+    # Check code freshness
+    local local_checksum=$(get_local_commit)
+    local remote_checksum=$(get_remote_checksum "$slave_ip")
     
-    # Remove old settings files that might have wrong values
-    if ssh "$REMOTE_USER@$slave_ip" "rm -f $SOURCE_DIR/*_settings.json" 2>&1 | tee -a "$LOG_FILE"; then
-        log "INFO" "$slave_name: Old settings files cleared"
+    if [ "$local_checksum" != "$remote_checksum" ]; then
+        echo -e "${YELLOW}  Code outdated: local=$local_checksum remote=$remote_checksum${NC}"
+        needs_sync=true
     else
-        log "WARN" "$slave_name: No settings files to clear or failed to clear them"
+        echo -e "${GREEN}  ✓ Code up to date ($local_checksum)${NC}"
     fi
     
-    # Stop old Tkinter services first (if running)
-    log "INFO" "$slave_name: Stopping old Tkinter services (if any)..."
-    ssh "$REMOTE_USER@$slave_ip" "sudo systemctl stop video_stream.service still_capture.service 2>/dev/null || true" 2>&1 | tee -a "$LOG_FILE"
-    ssh "$REMOTE_USER@$slave_ip" "sudo systemctl disable video_stream.service still_capture.service 2>/dev/null || true" 2>&1 | tee -a "$LOG_FILE"
+    # Check Qt services status
+    local service_status=$(check_remote_qt_services "$slave_ip")
+    IFS='|' read -r video_active capture_active video_enabled capture_enabled is_qt_code <<< "$service_status"
     
-    # Install Qt service files from codebase
-    log "INFO" "$slave_name: Installing Qt service files..."
-    if ssh "$REMOTE_USER@$slave_ip" "sudo cp $SOURCE_DIR/gertie-video.service /etc/systemd/system/ && sudo cp $SOURCE_DIR/gertie-capture.service /etc/systemd/system/" 2>&1 | tee -a "$LOG_FILE"; then
-        log "INFO" "$slave_name: Qt service files installed"
-    else
-        log "ERROR" "$slave_name: Failed to install Qt service files"
+    if [ "$video_enabled" != "enabled" ] || [ "$capture_enabled" != "enabled" ]; then
+        echo -e "${YELLOW}  Qt services not enabled${NC}"
+        needs_service_install=true
     fi
     
-    # Reload systemd and enable Qt services
-    log "INFO" "$slave_name: Reloading systemd and enabling Qt services..."
-    ssh "$REMOTE_USER@$slave_ip" "sudo systemctl daemon-reload" 2>&1 | tee -a "$LOG_FILE"
-    ssh "$REMOTE_USER@$slave_ip" "sudo systemctl enable gertie-video.service gertie-capture.service" 2>&1 | tee -a "$LOG_FILE"
-    
-    log "INFO" "$slave_name: Restarting Qt services..."
-    
-    # Restart Qt services (gertie-video and gertie-capture)
-    if ssh "$REMOTE_USER@$slave_ip" "sudo systemctl restart gertie-video.service" 2>&1 | tee -a "$LOG_FILE"; then
-        log "INFO" "$slave_name: gertie-video.service restarted"
+    if [ "$video_active" != "active" ] || [ "$capture_active" != "active" ]; then
+        echo -e "${YELLOW}  Qt services not running (video=$video_active capture=$capture_active)${NC}"
+        needs_restart=true
     else
-        log "ERROR" "$slave_name: Failed to restart gertie-video.service"
+        echo -e "${GREEN}  ✓ Qt services running${NC}"
     fi
     
-    # Restart still_capture
-    if ssh "$REMOTE_USER@$slave_ip" "sudo systemctl restart gertie-capture.service" 2>&1 | tee -a "$LOG_FILE"; then
-        log "INFO" "$slave_name: gertie-capture.service restarted"
+    if [ "$is_qt_code" != "yes" ]; then
+        echo -e "${YELLOW}  Not running Qt code path${NC}"
+        needs_restart=true
     else
-        log "ERROR" "$slave_name: Failed to restart gertie-capture.service"
+        echo -e "${GREEN}  ✓ Running Qt code path${NC}"
     fi
     
-    # Check service status
-    log "INFO" "$slave_name: Checking service status..."
-    ssh "$REMOTE_USER@$slave_ip" "systemctl status gertie-video.service gertie-capture.service --no-pager" 2>&1 | tee -a "$LOG_FILE"
+    # Check for old Tkinter services
+    local old_services=$(check_old_tkinter_services "$slave_ip")
+    if [ "$old_services" = "running" ]; then
+        echo -e "${YELLOW}  Old Tkinter services still running${NC}"
+        needs_restart=true
+    fi
     
-    # Verify services are running Qt code (not Tkinter)
-    log "INFO" "$slave_name: Verifying Qt code path..."
-    ssh "$REMOTE_USER@$slave_ip" "ps aux | grep -E 'video_stream|still_capture' | grep -v grep" 2>&1 | tee -a "$LOG_FILE"
-    
-    # Check for errors in recent logs
-    log "INFO" "$slave_name: Recent service logs (last 20 lines):"
-    ssh "$REMOTE_USER@$slave_ip" "journalctl -u gertie-video.service -u gertie-capture.service -n 20 --no-pager" 2>&1 | tee -a "$LOG_FILE"
-    
-    log "INFO" "$slave_name: Deployment completed"
+    # Perform actions if needed
+    if $needs_sync || $needs_service_install || $needs_restart; then
+        log_section "UPDATING $slave_name ($slave_ip)"
+        
+        if $needs_sync; then
+            log "INFO" "$slave_name: Syncing code..."
+            rsync -avz --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' \
+                "$SOURCE_DIR/" "$REMOTE_USER@$slave_ip:$SOURCE_DIR/" 2>&1 | tee -a "$LOG_FILE"
+            log "INFO" "$slave_name: Code synced"
+        fi
+        
+        if [ "$old_services" = "running" ]; then
+            stop_old_services "$slave_ip" "$slave_name"
+        fi
+        
+        if $needs_service_install; then
+            install_qt_services "$slave_ip" "$slave_name"
+        fi
+        
+        if $needs_sync || $needs_restart; then
+            # Clear settings files before restart
+            ssh "$REMOTE_USER@$slave_ip" "rm -f $SOURCE_DIR/*_settings.json" 2>/dev/null || true
+            restart_qt_services "$slave_ip" "$slave_name"
+        fi
+        
+        # Verify
+        local new_status=$(check_remote_qt_services "$slave_ip")
+        IFS='|' read -r v_act c_act v_en c_en qt_code <<< "$new_status"
+        if [ "$v_act" = "active" ] && [ "$c_act" = "active" ]; then
+            echo -e "${GREEN}  ✓ $slave_name: Services running${NC}"
+            log "INFO" "$slave_name: Update completed successfully"
+        else
+            echo -e "${RED}  ✗ $slave_name: Services failed to start${NC}"
+            log "ERROR" "$slave_name: Services failed to start (video=$v_act capture=$c_act)"
+        fi
+        
+        ((SLAVES_SYNCED++))
+    else
+        echo -e "${GREEN}  ✓ $slave_name: Already up to date${NC}"
+        log "INFO" "$slave_name: Already up to date, skipping"
+        ((SLAVES_SKIPPED++))
+    fi
 }
 
-# Function to sync to local slave (rep8)
+# Smart sync for local slave (rep8)
 sync_to_local() {
-    log_section "SYNCING TO rep8 (LOCAL)"
+    local needs_restart=false
     
-    log "INFO" "rep8: Clearing old settings files to force fresh initialization..."
+    echo -e "${CYAN}━━━ Checking rep8 (local) ━━━${NC}"
     
-    # Remove old settings files for local camera
-    if rm -f $SOURCE_DIR/rep8_settings.json 2>&1 | tee -a "$LOG_FILE"; then
-        log "INFO" "rep8: Old settings file cleared"
+    # Check local service
+    local local_status=$(systemctl is-active local_camera_slave.service 2>/dev/null || echo "inactive")
+    local local_enabled=$(systemctl is-enabled local_camera_slave.service 2>/dev/null || echo "disabled")
+    
+    if [ "$local_status" != "active" ]; then
+        echo -e "${YELLOW}  local_camera_slave.service not running${NC}"
+        needs_restart=true
     else
-        log "WARN" "rep8: No settings file to clear or failed to clear it"
+        echo -e "${GREEN}  ✓ local_camera_slave.service running${NC}"
     fi
     
-    log "INFO" "rep8: Restarting local services..."
-    
-    # Restart local services
-    if sudo systemctl restart local_camera_slave.service 2>&1 | tee -a "$LOG_FILE"; then
-        log "INFO" "rep8: local_camera_slave.service restarted"
-    else
-        log "ERROR" "rep8: Failed to restart local_camera_slave.service"
+    if [ "$local_enabled" != "enabled" ]; then
+        echo -e "${YELLOW}  local_camera_slave.service not enabled${NC}"
+        sudo systemctl enable local_camera_slave.service 2>/dev/null || true
     fi
     
-    # Check service status
-    log "INFO" "rep8: Checking service status..."
-    systemctl status local_camera_slave.service --no-pager 2>&1 | tee -a "$LOG_FILE"
-    
-    # Check for errors in recent logs
-    log "INFO" "rep8: Recent service logs (last 20 lines):"
-    journalctl -u local_camera_slave.service -n 20 --no-pager 2>&1 | tee -a "$LOG_FILE"
-    
-    log "INFO" "rep8: Deployment completed"
+    if $needs_restart; then
+        log_section "UPDATING rep8 (LOCAL)"
+        rm -f "$SOURCE_DIR/rep8_settings.json" 2>/dev/null || true
+        log "INFO" "rep8: Restarting local_camera_slave.service..."
+        sudo systemctl restart local_camera_slave.service 2>&1 | tee -a "$LOG_FILE"
+        ((SERVICES_RESTARTED++))
+        
+        # Verify
+        sleep 1
+        local new_status=$(systemctl is-active local_camera_slave.service 2>/dev/null || echo "inactive")
+        if [ "$new_status" = "active" ]; then
+            echo -e "${GREEN}  ✓ rep8: Service running${NC}"
+            log "INFO" "rep8: Update completed successfully"
+        else
+            echo -e "${RED}  ✗ rep8: Service failed to start${NC}"
+            log "ERROR" "rep8: Service failed to start"
+        fi
+        ((SLAVES_SYNCED++))
+    else
+        echo -e "${GREEN}  ✓ rep8: Already up to date${NC}"
+        log "INFO" "rep8: Already up to date, skipping"
+        ((SLAVES_SKIPPED++))
+    fi
 }
 
-# Deploy to all remote slaves
-for slave_ip in "${REMOTE_SLAVES[@]}"; do
-    sync_to_remote "$slave_ip" || log "ERROR" "Failed to sync to $slave_ip"
-done
+# ============================================================================
+# MAIN EXECUTION
+# ============================================================================
 
-# Deploy to local slave (rep8)
-sync_to_local
+log_section "SMART DEPLOYMENT STARTED"
+log "INFO" "Checking system status before deployment..."
 
-# Summary
-log_section "DEPLOYMENT SUMMARY"
-log "INFO" "Deployment to all slaves completed"
-log "INFO" "Checking network connectivity..."
-
-# Network check
-for slave_ip in "${REMOTE_SLAVES[@]}"; do
-    if ping -c 1 -W 2 "$slave_ip" &> /dev/null; then
-        log "INFO" "$slave_ip: Reachable"
-    else
-        log "WARN" "$slave_ip: Not reachable"
-    fi
-done
-
-# System status
-log_section "SYSTEM STATUS CHECK"
-log "INFO" "Control1 (master) status:"
-log "INFO" "Disk usage:"
-df -h / 2>&1 | tee -a "$LOG_FILE"
-
-log "INFO" "Memory usage:"
-free -h 2>&1 | tee -a "$LOG_FILE"
-
-log "INFO" "CPU temperature:"
-vcgencmd measure_temp 2>&1 | tee -a "$LOG_FILE" || log "WARN" "Temperature check not available"
-
-log "INFO" "Network interfaces:"
-ip addr show 2>&1 | tee -a "$LOG_FILE"
-
-# Log file location
-log_section "DEPLOYMENT COMPLETE"
-log "INFO" "Full log saved to: $LOG_FILE"
-log "INFO" "Log size: $(du -h "$LOG_FILE" | cut -f1)"
-log "INFO" "To view full log: cat $LOG_FILE"
-log "INFO" "To view recent errors: grep ERROR $LOG_FILE | tail -20"
-log "INFO" "Timestamp: $TIMESTAMP"
+LOCAL_COMMIT=$(get_local_commit)
+log "INFO" "Local code version: $LOCAL_COMMIT"
 
 echo ""
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}Deployment completed successfully${NC}"
-echo -e "${GREEN}Log file: $LOG_FILE${NC}"
-echo -e "${GREEN}========================================${NC}"
+echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║   GERTIE Qt Smart Deployment           ║${NC}"
+echo -e "${BLUE}║   Checking 8 cameras...                ║${NC}"
+echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+echo ""
+
+# Check and sync all remote slaves
+for slave_ip in "${REMOTE_SLAVES[@]}"; do
+    sync_to_remote "$slave_ip" || true
+    echo ""
+done
+
+# Check and sync local slave
+sync_to_local
+echo ""
+
+# ============================================================================
+# SUMMARY
+# ============================================================================
+
+log_section "DEPLOYMENT SUMMARY"
+
+echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║   Deployment Complete                  ║${NC}"
+echo -e "${BLUE}╠════════════════════════════════════════╣${NC}"
+printf "${BLUE}║${NC}   Slaves synced:    ${GREEN}%-18s${NC}${BLUE}║${NC}\n" "$SLAVES_SYNCED"
+printf "${BLUE}║${NC}   Slaves skipped:   ${CYAN}%-18s${NC}${BLUE}║${NC}\n" "$SLAVES_SKIPPED"
+printf "${BLUE}║${NC}   Slaves failed:    ${RED}%-18s${NC}${BLUE}║${NC}\n" "$SLAVES_FAILED"
+printf "${BLUE}║${NC}   Services restarted: ${YELLOW}%-16s${NC}${BLUE}║${NC}\n" "$SERVICES_RESTARTED"
+echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+
+log "INFO" "Slaves synced: $SLAVES_SYNCED | Skipped: $SLAVES_SKIPPED | Failed: $SLAVES_FAILED | Services restarted: $SERVICES_RESTARTED"
+
+# Quick status check
+echo ""
+echo -e "${CYAN}Final service status:${NC}"
+for ip in 201 202 203 204 205 206 207; do
+    v=$(ssh -o ConnectTimeout=2 andrc1@192.168.0.$ip "systemctl is-active gertie-video.service" 2>/dev/null || echo "?")
+    c=$(ssh -o ConnectTimeout=2 andrc1@192.168.0.$ip "systemctl is-active gertie-capture.service" 2>/dev/null || echo "?")
+    if [ "$v" = "active" ] && [ "$c" = "active" ]; then
+        echo -e "  rep$((ip-200)): ${GREEN}✓ video=$v capture=$c${NC}"
+    else
+        echo -e "  rep$((ip-200)): ${RED}✗ video=$v capture=$c${NC}"
+    fi
+done
+local_status=$(systemctl is-active local_camera_slave.service 2>/dev/null || echo "?")
+if [ "$local_status" = "active" ]; then
+    echo -e "  rep8:  ${GREEN}✓ local=$local_status${NC}"
+else
+    echo -e "  rep8:  ${RED}✗ local=$local_status${NC}"
+fi
+
+log "INFO" "Full log: $LOG_FILE"
 echo ""
