@@ -382,13 +382,15 @@ def start_stream():
         logging.info(f"[VIDEO] - Frame transforms: Applied per-frame separately")
         
         # Configure camera with ONLY hardware controls
-        # WYSIWYG FIX v2: Use raw (sensor) config to force full sensor usage
+        # WYSIWYG FIX v3: Let camera auto-select appropriate 4:3 sensor mode
+        # IMPORTANT: Do NOT specify raw size! 4608x2592 was WRONG (16:9 binned mode)
+        # The HQ camera full sensor is 4056x3040 (4:3), not 4608x2592 (16:9)
+        # By omitting raw, camera selects optimal 4:3 mode for requested output
         video_config = picam2.create_video_configuration(
             main={"size": resolution, "format": "RGB888"},
-            raw={"size": (4608, 2592)},  # Force full HQ sensor - prevents center crop
             controls=camera_controls
         )
-        logging.info(f"[VIDEO] WYSIWYG v2: Using full sensor (4608x2592) → scaled to {resolution}")
+        logging.info(f"[VIDEO] WYSIWYG v3: Auto sensor mode for {resolution} (4:3 preserved, no crop)")
         picam2.configure(video_config)
         picam2.start()
         
