@@ -302,6 +302,17 @@ def capture_with_processing(filename):
             if success and os.path.exists(filename):
                 file_size = os.path.getsize(filename)
                 img_shape = processed_image.shape if processed_image is not None else "None"
+                
+                # Extract dimensions for logging
+                if processed_image is not None and len(processed_image.shape) >= 2:
+                    img_height, img_width = processed_image.shape[:2]
+                    ratio = img_width / img_height if img_height > 0 else 0
+                    aspect_str = "4:3 ✓" if abs(ratio - 4/3) < 0.01 else f"{ratio:.3f} ⚠️"
+                    logging.info(f"[CAPTURE] ✅ {device_name}: {img_width}x{img_height} ({aspect_str}) - {file_size} bytes")
+                else:
+                    img_width, img_height = 0, 0
+                    logging.info(f"[CAPTURE] ✅ {device_name}: shape={img_shape} - {file_size} bytes")
+                
                 logging.info(f"[SLAVE] Processed image saved: {filename} (size={file_size} bytes, shape={img_shape})")
                 
                 # DIAGNOSTIC: Warn if file is suspiciously small (< 100KB for full res)
@@ -309,6 +320,11 @@ def capture_with_processing(filename):
                     logging.warning(f"[SLAVE] ⚠️ SMALL FILE WARNING: {filename} only {file_size} bytes - expected >1MB for 4056x3040")
                     logging.warning(f"[SLAVE] Image array shape: {image_array.shape if image_array is not None else 'None'}")
                     logging.warning(f"[SLAVE] Processed shape: {img_shape}")
+                
+                # Warn if not expected 4:3 full resolution
+                if img_width > 0 and img_height > 0:
+                    if img_width != 4056 or img_height != 3040:
+                        logging.warning(f"[CAPTURE] ⚠️ Non-standard resolution: {img_width}x{img_height} (expected 4056x3040)")
                 
                 return filename
             else:

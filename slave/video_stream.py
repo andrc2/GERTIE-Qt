@@ -402,9 +402,16 @@ def start_stream():
         camera_controls = build_camera_controls(device_name)
         
         logging.info(f"[VIDEO] Camera config for {device_name}:")
-        logging.info(f"[VIDEO] - Resolution: {resolution}")
+        logging.info(f"[VIDEO] - Resolution: {resolution[0]}x{resolution[1]} (aspect ratio: {resolution[0]/resolution[1]:.3f})")
         logging.info(f"[VIDEO] - Hardware controls: {camera_controls}")
         logging.info(f"[VIDEO] - Frame transforms: Applied per-frame separately")
+        
+        # Verify 4:3 aspect ratio
+        ratio = resolution[0] / resolution[1]
+        if abs(ratio - 4/3) < 0.01:
+            logging.info(f"[VIDEO] ✅ Resolution {resolution[0]}x{resolution[1]} is 4:3 (correct)")
+        else:
+            logging.warning(f"[VIDEO] ⚠️ Resolution {resolution[0]}x{resolution[1]} is NOT 4:3 (ratio={ratio:.3f})")
         
         # Configure camera with ONLY hardware controls
         # WYSIWYG FIX v3: Let camera auto-select appropriate 4:3 sensor mode
@@ -619,9 +626,14 @@ def handle_settings_package_fixed(command, device_name):
         new_settings = json.loads(json_part)
         
         logging.info(f"[SETTINGS] Processing package for {device_name}: {len(new_settings)} settings")
+        logging.info(f"[SETTINGS] Received settings: {new_settings}")
         
         # Load current settings
         current_settings = load_device_settings(device_name)
+        
+        # Log current resolution BEFORE changes
+        resolution_before = current_settings.get('resolution', '640x480')
+        logging.info(f"[RESOLUTION] BEFORE for {device_name}: {resolution_before}")
         
         # Log brightness BEFORE changes
         brightness_before = current_settings.get('brightness', 50)
@@ -630,10 +642,16 @@ def handle_settings_package_fixed(command, device_name):
         # Process settings with CRITICAL brightness protection
         camera_changes = []
         transform_changes = []
+        resolution_changed = False
         
         for key, value in new_settings.items():
             if key in current_settings:
                 old_val = current_settings[key]
+                
+                # Track resolution changes specifically
+                if key == 'resolution' and old_val != value:
+                    resolution_changed = True
+                    logging.info(f"[RESOLUTION] 🔄 CHANGING for {device_name}: {old_val} → {value}")
                 
                 # FIXED: brightness=0 is valid! It's the GUI neutral value
                 # No need to block it anymore
@@ -648,6 +666,10 @@ def handle_settings_package_fixed(command, device_name):
                     transform_changes.append(f"{key}: {old_val}→{value}")
                 else:
                     camera_changes.append(f"{key}: {old_val}→{value}")
+        
+        # Log resolution AFTER changes
+        resolution_after = current_settings.get('resolution', '640x480')
+        logging.info(f"[RESOLUTION] AFTER for {device_name}: {resolution_after}")
         
         # Log brightness AFTER changes
         brightness_after = current_settings.get('brightness', 50)
@@ -676,6 +698,8 @@ def handle_settings_package_fixed(command, device_name):
         if camera_changes:
             # Camera hardware settings changed - need full restart
             logging.info(f"[SETTINGS] 🔄 Camera controls changed for {device_name} - full restart")
+            if resolution_changed:
+                logging.info(f"[RESOLUTION] 🚀 Restarting stream with new resolution {resolution_after}")
             restart_stream()
         elif transform_changes:
             # Only frame transforms changed - no camera restart needed

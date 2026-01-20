@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QPushButton, QSplitter, QProgressBar, QSizePolicy
 )
 from PySide6.QtCore import QTimer, Qt, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QImage
 
 # Import our modules
 from network_manager import NetworkManager
@@ -29,11 +29,43 @@ from gallery_panel import GalleryPanel
 from camera_settings_dialog import CameraSettingsDialog
 from config import get_ip_from_camera_id, SLAVES
 
+# ============================================================================
+# LOGGING SETUP - Writes to ~/Desktop/qt_gui.log for troubleshooting
+# ============================================================================
+LOG_DIR = os.path.expanduser("~/Desktop")
+GUI_LOG_FILE = os.path.join(LOG_DIR, "qt_gui.log")
+
+# Create file handler for GUI-specific logging
+gui_logger = logging.getLogger("GERTIE_GUI")
+gui_logger.setLevel(logging.DEBUG)
+
+# File handler - detailed logs to file
+file_handler = logging.FileHandler(GUI_LOG_FILE, mode='a')
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(logging.Formatter(
+    '%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+))
+gui_logger.addHandler(file_handler)
+
+# Console handler - info level to stdout
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S'))
+gui_logger.addHandler(console_handler)
+
+gui_logger.info("=" * 70)
+gui_logger.info("GERTIE Qt GUI Starting - Log file: %s", GUI_LOG_FILE)
+gui_logger.info("=" * 70)
+
 # Resolution settings for exclusive mode
 # Pi HQ Camera has 4:3 native sensor (4056x3040) - use 4:3 resolutions to avoid cropping!
 NORMAL_RESOLUTION = (640, 480)    # 4:3 - efficient for 8-camera grid
 EXCLUSIVE_RESOLUTION = (1280, 960)  # 4:3 HD - matches HQ camera native aspect ratio
 ENABLE_RESOLUTION_SWITCHING = True  # Re-enabled: GUI freeze was from decode-on-signal, not resolution switching
+
+gui_logger.info("Resolution config: NORMAL=%s, EXCLUSIVE=%s, SWITCHING=%s", 
+                NORMAL_RESOLUTION, EXCLUSIVE_RESOLUTION, ENABLE_RESOLUTION_SWITCHING)
 
 
 class CameraWidget(QWidget):
@@ -369,6 +401,15 @@ class MainWindow(QMainWindow):
                     self.decoded_frames[camera_id] = pixmap
                     widget = self.camera_widgets[camera_id - 1]
                     widget.update_frame(pixmap)
+                    
+                    # Log decoded frame dimensions periodically for resolution debugging
+                    if not hasattr(self, '_decode_log_count'):
+                        self._decode_log_count = {}
+                    self._decode_log_count[camera_id] = self._decode_log_count.get(camera_id, 0) + 1
+                    if self._decode_log_count[camera_id] % 200 == 1:  # First frame and every 200th
+                        gui_logger.info("[DECODE] Camera %d: decoded frame %dx%d (frame #%d)", 
+                                       camera_id, pixmap.width(), pixmap.height(), 
+                                       self._decode_log_count[camera_id])
                 
                 # Store bytes for frame capture
                 if len(self.current_frames) < 8:
@@ -500,6 +541,15 @@ class MainWindow(QMainWindow):
         if camera_id not in self._first_frame_logged:
             self._first_frame_logged.add(camera_id)
             print(f"  📹 First frame from camera {camera_id}: {len(data)} bytes")
+            gui_logger.info("[FRAME] First frame from camera %d: %d bytes", camera_id, len(data))
+        
+        # Log frame size periodically for resolution debugging (every 500 frames per camera)
+        if not hasattr(self, '_frame_log_count'):
+            self._frame_log_count = {}
+        self._frame_log_count[camera_id] = self._frame_log_count.get(camera_id, 0) + 1
+        if self._frame_log_count[camera_id] % 500 == 0:
+            gui_logger.debug("[FRAME] Camera %d: frame #%d, %d bytes", 
+                           camera_id, self._frame_log_count[camera_id], len(data))
     
     def _on_still_image_received(self, camera_id: int, data: bytes, timestamp: str):
         """Handle incoming high-resolution still image from real camera"""
@@ -513,6 +563,30 @@ class MainWindow(QMainWindow):
             size_kb = len(data) / 1024
             self.capture_count += 1
             
+            # Get image dimensions for logging
+            img_width, img_height = 0, 0
+            aspect_ratio = "unknown"
+            try:
+                # Decode to get dimensions
+                img = QImage()
+                if img.loadFromData(data):
+                    img_width = img.width()
+                    img_height = img.height()
+                    if img_height > 0:
+                        ratio = img_width / img_height
+                        if abs(ratio - 4/3) < 0.01:
+                            aspect_ratio = "4:3 ✓"
+                        elif abs(ratio - 16/9) < 0.01:
+                            aspect_ratio = "16:9 ⚠️"
+                        else:
+                            aspect_ratio = f"{ratio:.2f}"
+            except Exception as e:
+                gui_logger.warning("[CAPTURE] Failed to get dimensions for camera %d: %s", camera_id, e)
+            
+            # Log capture with dimensions
+            gui_logger.info("[CAPTURE] Camera %d: %s - %dx%d (%s) %.0fKB", 
+                          camera_id, os.path.basename(filename), img_width, img_height, aspect_ratio, size_kb)
+            
             # Decrement pending count and update progress bar
             if self.pending_hires_count > 0:
                 self.pending_hires_count -= 1
@@ -522,9 +596,9 @@ class MainWindow(QMainWindow):
             
             # Show status
             if self.pending_hires_count > 0:
-                print(f"  📸 Hi-res: {os.path.basename(filename)} ({size_kb:.0f}KB) [{self.pending_hires_count} left]")
+                print(f"  📸 Hi-res: {os.path.basename(filename)} ({size_kb:.0f}KB) {img_width}x{img_height} {aspect_ratio} [{self.pending_hires_count} left]")
             else:
-                print(f"  📸 Hi-res: {os.path.basename(filename)} ({size_kb:.0f}KB) [done]")
+                print(f"  📸 Hi-res: {os.path.basename(filename)} ({size_kb:.0f}KB) {img_width}x{img_height} {aspect_ratio} [done]")
                 # All images received - stop timeout timer and hide progress
                 if self.capture_timeout_timer:
                     self.capture_timeout_timer.stop()
@@ -537,6 +611,7 @@ class MainWindow(QMainWindow):
                 
         except Exception as e:
             print(f"  ⚠️ Still save error for camera {camera_id}: {e}")
+            gui_logger.error("[CAPTURE] Error saving camera %d: %s", camera_id, e)
     
     def _toggle_gallery(self):
         """Toggle gallery visibility using splitter"""
@@ -546,9 +621,11 @@ class MainWindow(QMainWindow):
             sizes = self.splitter.sizes()
             total = sum(sizes)
             self.splitter.setSizes([int(total * 0.7), int(total * 0.3)])
+            gui_logger.info("[GALLERY] Shown - splitter sizes: %s", self.splitter.sizes())
         else:
             # Hide gallery - give all space to cameras
             self.gallery.hide()
+            gui_logger.info("[GALLERY] Hidden")
     
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts - matches Tkinter behavior"""
@@ -624,16 +701,20 @@ class MainWindow(QMainWindow):
         if self.exclusive_camera == camera_id:
             # Already showing this camera exclusively - return to normal view
             print(f"🔲 Exiting exclusive mode for camera {camera_id}")
+            gui_logger.info("[EXCLUSIVE] Exiting exclusive mode for camera %d", camera_id)
             self._show_all_cameras()
         else:
             # Enter exclusive mode for this camera
             print(f"🔳 Entering exclusive mode for camera {camera_id}")
+            gui_logger.info("[EXCLUSIVE] Entering exclusive mode for camera %d", camera_id)
             self.exclusive_camera = camera_id
             
             # Request higher resolution for focus checking
             if ENABLE_RESOLUTION_SWITCHING:
                 widget = self.camera_widgets[camera_id - 1]
                 print(f"📐 Requesting HD resolution ({EXCLUSIVE_RESOLUTION[0]}x{EXCLUSIVE_RESOLUTION[1]}) for camera {camera_id}")
+                gui_logger.info("[RESOLUTION] Requesting %dx%d for camera %d (ip=%s)", 
+                              EXCLUSIVE_RESOLUTION[0], EXCLUSIVE_RESOLUTION[1], camera_id, widget.ip)
                 self.network_manager.send_set_resolution(
                     widget.ip, 
                     EXCLUSIVE_RESOLUTION[0], 
@@ -673,10 +754,13 @@ class MainWindow(QMainWindow):
             return  # Already in normal view
         
         print("🔲 Showing all cameras in normal grid")
+        gui_logger.info("[EXCLUSIVE] Returning to normal grid view")
         
         # Reset resolution for ALL cameras that were set to HD (not just current one!)
         if ENABLE_RESOLUTION_SWITCHING and self._hd_cameras:
             print(f"📐 Resetting {len(self._hd_cameras)} cameras to normal resolution ({NORMAL_RESOLUTION[0]}x{NORMAL_RESOLUTION[1]})")
+            gui_logger.info("[RESOLUTION] Resetting %d cameras to %dx%d: %s", 
+                          len(self._hd_cameras), NORMAL_RESOLUTION[0], NORMAL_RESOLUTION[1], list(self._hd_cameras))
             for camera_id in self._hd_cameras:
                 widget = self.camera_widgets[camera_id - 1]
                 self.network_manager.send_set_resolution(
@@ -698,6 +782,10 @@ class MainWindow(QMainWindow):
             # Re-add at normal position: row = i // 4, col = i % 4
             self.camera_grid.addWidget(widget, i // 4, i % 4)
             widget.show()
+        
+        # Check gallery state after returning to grid
+        gallery_visible = self.gallery.isVisible() if hasattr(self, 'gallery') else False
+        gui_logger.info("[GRID] Restored 8-camera grid, gallery visible: %s", gallery_visible)
         
         # Force redraw all cameras after layout processes (100ms delay)
         QTimer.singleShot(100, self._force_redraw_all_cameras)
