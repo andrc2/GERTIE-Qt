@@ -1,0 +1,15 @@
+[Unit]
+Description=GERTIE Qt Still Capture Service
+After=network.target
+
+[Service]
+Type=simple
+User=andrc1
+WorkingDirectory=/home/andrc1/camera_system_qt_conversion/slave
+ExecStart=/usr/bin/python3 /home/andrc1/camera_system_qt_conversion/slave/still_capture.py
+Restart=always
+RestartSec=5
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=multi-user.target
