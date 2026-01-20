@@ -157,6 +157,9 @@ class MainWindow(QMainWindow):
         self.capture_count = 0
         self.current_frames = []
         
+        # Exclusive mode (single camera enlarged view)
+        self.exclusive_camera = None  # Camera ID (1-8) when in exclusive mode, None for normal view
+        
         # Capture queue tracking (no cooldown - uses adaptive chunk sizing instead)
         self.pending_hires_count = 0  # Number of hi-res images pending
         self.capture_timeout_timer = None  # Timer to reset stuck captures
@@ -172,14 +175,15 @@ class MainWindow(QMainWindow):
         print("="*70)
         print("GERTIE Qt - Production Network Mode")
         print("="*70)
-        print("Controls:")
-        print("  Space: Pause/Resume video")
-        print("  C: Capture all cameras")
+        print("Keyboard Shortcuts:")
+        print("  Space: Capture all cameras")
+        print("  C: Capture all cameras (alternate)")
+        print("  1-8: Toggle camera preview (exclusive mode)")
+        print("  Escape: Show all cameras (exit exclusive)")
+        print("  R: Restart all streams")
+        print("  S: Open settings")
         print("  G: Toggle gallery")
-        print("  R: Reset stats")
         print("  Q: Quit")
-        print("  1-8: Capture individual camera")
-        print("  ⚙️ button: Per-camera settings")
         print("="*70)
         
         # Start video streams on all cameras after short delay
@@ -208,18 +212,18 @@ class MainWindow(QMainWindow):
         cameras_widget.setLayout(cameras_layout)
         
         # Camera grid (2x4)
-        grid = QGridLayout()
-        grid.setSpacing(5)
+        self.camera_grid = QGridLayout()
+        self.camera_grid.setSpacing(5)
         
         self.camera_widgets = []
         for i in range(8):
             widget = CameraWidget(i + 1)
             widget.capture_requested.connect(self._on_camera_capture)
             widget.settings_requested.connect(self._on_camera_settings)
-            grid.addWidget(widget, i // 4, i % 4)
+            self.camera_grid.addWidget(widget, i // 4, i % 4)
             self.camera_widgets.append(widget)
         
-        cameras_layout.addLayout(grid)
+        cameras_layout.addLayout(self.camera_grid)
         
         # Bottom controls
         controls = QHBoxLayout()
@@ -504,33 +508,37 @@ class MainWindow(QMainWindow):
             self.gallery.hide()
     
     def keyPressEvent(self, event):
-        """Handle keyboard"""
+        """Handle keyboard shortcuts - matches Tkinter behavior"""
         key = event.key()
         
-        if key == Qt.Key.Key_Space:
-            self.paused = not self.paused
-            status = "PAUSED" if self.paused else "RUNNING"
-            self.status_bar.showMessage(f"Status: {status}", 2000)
-        
-        elif key == Qt.Key.Key_R:
-            self.frame_count = 0
-            self.start_time = time.time()
-            self.camera_system.reset_all_stats()
-            self.status_bar.showMessage("Stats reset", 2000)
-        
-        elif key == Qt.Key.Key_C:
+        # Space or C: Capture All
+        if key == Qt.Key.Key_Space or key == Qt.Key.Key_C:
             self._on_capture_all()
         
+        # R: Restart all streams
+        elif key == Qt.Key.Key_R:
+            self._restart_all_streams()
+        
+        # S: Open settings
+        elif key == Qt.Key.Key_S:
+            self._open_settings()
+        
+        # G: Toggle gallery
         elif key == Qt.Key.Key_G:
             self.toggle_gallery_btn.click()
         
+        # Escape: Show all cameras (exit exclusive mode)
+        elif key == Qt.Key.Key_Escape:
+            self._show_all_cameras()
+        
+        # Q: Quit
         elif key == Qt.Key.Key_Q:
             self.close()
         
-        # Keys 1-8: Capture individual cameras
+        # Keys 1-8: Toggle camera preview (exclusive mode)
         elif key >= Qt.Key.Key_1 and key <= Qt.Key.Key_8:
             camera_id = key - Qt.Key.Key_1 + 1  # Convert to 1-8
-            self._on_capture_single(camera_id)
+            self._toggle_camera_preview(camera_id)
     
     def _on_capture_single(self, camera_id: int):
         """Capture single camera by ID (1-8)"""
@@ -549,6 +557,93 @@ class MainWindow(QMainWindow):
             self.capture_count += 1
             self._save_frame_capture(camera_id)
             self.status_bar.showMessage(f"Captured camera {camera_id}", 2000)
+    
+    def _toggle_camera_preview(self, camera_id: int):
+        """Toggle exclusive camera preview - show only selected camera enlarged
+        
+        Matches Tkinter behavior:
+        - If clicking the same camera that's already exclusive, return to normal view
+        - Otherwise, enter exclusive mode showing only that camera enlarged
+        """
+        if camera_id < 1 or camera_id > 8:
+            return
+        
+        if self.exclusive_camera == camera_id:
+            # Already showing this camera exclusively - return to normal view
+            print(f"🔲 Exiting exclusive mode for camera {camera_id}")
+            self._show_all_cameras()
+        else:
+            # Enter exclusive mode for this camera
+            print(f"🔳 Entering exclusive mode for camera {camera_id}")
+            self.exclusive_camera = camera_id
+            
+            # Hide all cameras except the selected one
+            for i, widget in enumerate(self.camera_widgets):
+                widget_camera_id = i + 1
+                if widget_camera_id == camera_id:
+                    # Show selected camera enlarged (span full grid)
+                    widget.show()
+                    # Remove from current position and re-add spanning multiple cells
+                    self.camera_grid.removeWidget(widget)
+                    self.camera_grid.addWidget(widget, 0, 0, 2, 4)  # row, col, rowspan, colspan
+                else:
+                    widget.hide()
+            
+            self.status_bar.showMessage(f"Camera {camera_id} (Press Escape or {camera_id} to exit)", 3000)
+    
+    def _show_all_cameras(self):
+        """Return to normal view showing all 8 cameras in 2x4 grid
+        
+        Called when:
+        - Escape key pressed
+        - Same camera number pressed again in exclusive mode
+        """
+        if self.exclusive_camera is None:
+            return  # Already in normal view
+        
+        print("🔲 Showing all cameras in normal grid")
+        self.exclusive_camera = None
+        
+        # Restore all cameras to their normal grid positions (2x4)
+        for i, widget in enumerate(self.camera_widgets):
+            # Remove from current position first
+            self.camera_grid.removeWidget(widget)
+            # Re-add at normal position: row = i // 4, col = i % 4
+            self.camera_grid.addWidget(widget, i // 4, i % 4)
+            widget.show()
+        
+        self.status_bar.showMessage("All cameras", 2000)
+    
+    def _restart_all_streams(self):
+        """Restart video streams on all cameras
+        
+        Stops all streams, waits briefly, then starts them again.
+        Useful when streams get out of sync or stop responding.
+        """
+        print("\n🔄 Restarting all video streams...")
+        self.status_bar.showMessage("Restarting streams...", 2000)
+        
+        # Stop all streams
+        self.network_manager.send_stop_all_streams()
+        
+        # Start streams again after a short delay
+        QTimer.singleShot(1000, self._start_all_streams)
+        
+        # Update status after restart completes
+        QTimer.singleShot(2000, lambda: self.status_bar.showMessage("Streams restarted", 2000))
+    
+    def _open_settings(self):
+        """Open camera settings dialog for all cameras
+        
+        Opens the settings dialog to adjust camera parameters
+        """
+        print("\n⚙️ Opening settings dialog...")
+        
+        # Use camera 1 as default for the settings dialog
+        # The dialog can affect all cameras or specific ones
+        if self.camera_widgets:
+            first_camera = self.camera_widgets[0]
+            self._on_camera_settings(first_camera.camera_id, first_camera.ip)
     
     def closeEvent(self, event):
         """Cleanup"""
