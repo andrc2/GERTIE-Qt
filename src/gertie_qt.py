@@ -347,23 +347,33 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("Ready")
     
     def _update_frames(self):
-        """Update camera frames - display pre-decoded pixmaps (NO re-decode)"""
+        """Update camera frames - decode and display only dirty frames
+        
+        CRITICAL: Decoding happens HERE (max 8 per 50ms) not in signal handler.
+        This keeps GUI responsive by limiting decode work per timer tick.
+        """
         if self.paused:
             return
         
-        # Only update widgets with NEW frames (already decoded in _on_video_frame_received)
+        # Only update widgets with NEW frames - decode here, not in signal handler
         dirty_cameras = list(self.frame_dirty)
         self.frame_dirty.clear()
         
         for camera_id in dirty_cameras:
-            if camera_id in self.decoded_frames:
-                widget = self.camera_widgets[camera_id - 1]
-                widget.update_frame(self.decoded_frames[camera_id])
+            if camera_id in self.real_frames:
+                data = self.real_frames[camera_id]
+                
+                # Decode JPEG to QPixmap (max 8 per timer tick = 160/sec vs 200+/sec before)
+                pixmap = QPixmap()
+                if pixmap.loadFromData(data):
+                    self.decoded_frames[camera_id] = pixmap
+                    widget = self.camera_widgets[camera_id - 1]
+                    widget.update_frame(pixmap)
                 
                 # Store bytes for frame capture
                 if len(self.current_frames) < 8:
                     self.current_frames = [None] * 8
-                self.current_frames[camera_id - 1] = self.real_frames.get(camera_id)
+                self.current_frames[camera_id - 1] = data
         
         self.frame_count += 1
         
@@ -476,13 +486,13 @@ class MainWindow(QMainWindow):
         pass
     
     def _on_video_frame_received(self, ip: str, camera_id: int, data: bytes):
-        """Handle incoming video frame - DECODE IMMEDIATELY for instant thumbnails"""
-        # Decode now so decoded_frames is always ready for instant thumbnail capture
-        pixmap = QPixmap()
-        if pixmap.loadFromData(data):
-            self.decoded_frames[camera_id] = pixmap
-            self.real_frames[camera_id] = data
-            self.frame_dirty.add(camera_id)
+        """Handle incoming video frame - STORE ONLY, decode on display timer
+        
+        CRITICAL: Do NOT decode here! This runs ~200x/sec and blocks GUI.
+        Just store raw bytes and mark dirty. Decode in _update_frames().
+        """
+        self.real_frames[camera_id] = data
+        self.frame_dirty.add(camera_id)
         
         # Log first frame per camera (one-time only)
         if not hasattr(self, '_first_frame_logged'):
