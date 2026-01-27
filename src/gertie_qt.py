@@ -909,17 +909,84 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(2000, lambda: self.status_bar.showMessage("Streams restarted", 2000))
     
     def _open_settings(self):
-        """Open camera settings dialog for all cameras
+        """Open camera settings dialog with camera selector
         
-        Opens the settings dialog to adjust camera parameters
+        Shows a quick selector for which camera to configure.
+        RAW-capable cameras (REP2, REP8) are marked with 📷.
         """
         print("\n⚙️ Opening settings dialog...")
         
-        # Use camera 1 as default for the settings dialog
-        # The dialog can affect all cameras or specific ones
-        if self.camera_widgets:
-            first_camera = self.camera_widgets[0]
-            self._on_camera_settings(first_camera.camera_id, first_camera.ip)
+        if not self.camera_widgets:
+            print("  No cameras available")
+            return
+        
+        # Create a simple selection dialog
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QComboBox, QPushButton, QLabel
+        
+        selector = QDialog(self)
+        selector.setWindowTitle("Select Camera")
+        selector.setFixedWidth(300)
+        layout = QVBoxLayout(selector)
+        
+        label = QLabel("Select camera to configure:")
+        label.setStyleSheet("color: white; font-size: 14px;")
+        layout.addWidget(label)
+        
+        combo = QComboBox()
+        combo.setStyleSheet("""
+            QComboBox {
+                background: #333;
+                color: white;
+                padding: 8px;
+                font-size: 14px;
+                border: 1px solid #555;
+                border-radius: 4px;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox QAbstractItemView {
+                background: #333;
+                color: white;
+                selection-background-color: #0066cc;
+            }
+        """)
+        
+        # Add cameras with RAW indicator for rep2/rep8
+        for widget in self.camera_widgets:
+            raw_marker = " 📷 RAW" if widget.ip in ("192.168.0.202", "127.0.0.1") else ""
+            combo.addItem(f"REP{widget.camera_id} ({widget.ip}){raw_marker}", 
+                          (widget.camera_id, widget.ip))
+        
+        layout.addWidget(combo)
+        
+        # Hint about RAW cameras
+        hint = QLabel("📷 = RAW capture available")
+        hint.setStyleSheet("color: #888; font-size: 11px; margin-top: 5px;")
+        layout.addWidget(hint)
+        
+        btn = QPushButton("Open Settings")
+        btn.setStyleSheet("""
+            QPushButton {
+                background: #0066cc;
+                color: white;
+                padding: 10px;
+                font-size: 14px;
+                border: none;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background: #0077ee;
+            }
+        """)
+        btn.clicked.connect(selector.accept)
+        layout.addWidget(btn)
+        
+        selector.setStyleSheet("background: #1a1a1a;")
+        
+        if selector.exec() == QDialog.Accepted:
+            camera_id, ip = combo.currentData()
+            self._on_camera_settings(camera_id, ip)
     
     def closeEvent(self, event):
         """Cleanup"""
