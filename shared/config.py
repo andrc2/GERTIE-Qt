@@ -32,13 +32,19 @@ LOCAL_VIDEO_CONTROL_PORT = 5014
 # Slave devices configuration
 SLAVES = {
     "rep1": {"ip": "192.168.0.201"},
-    "rep2": {"ip": "192.168.0.202"},
+    "rep2": {"ip": "192.168.0.202", "raw_capable": True},  # Dorsal camera - RAW capable
     "rep3": {"ip": "192.168.0.203"},
     "rep4": {"ip": "192.168.0.204"},
     "rep5": {"ip": "192.168.0.205"},
     "rep6": {"ip": "192.168.0.206"},
     "rep7": {"ip": "192.168.0.207"},
-    "rep8": {"ip": "127.0.0.1", "local": True, "use_slave_scripts": True},  # Uses same slave/*.py as remote cameras
+    "rep8": {"ip": "127.0.0.1", "local": True, "use_slave_scripts": True, "raw_capable": True},  # Lateral camera - RAW capable
+}
+
+# RAW capture settings (for raw_capable cameras)
+RAW_CAPTURE_SETTINGS = {
+    "rep2": {"raw_enabled": False},  # Toggle via settings dialog
+    "rep8": {"raw_enabled": False},  # Toggle via settings dialog
 }
 
 # Grid configuration
