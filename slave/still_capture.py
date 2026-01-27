@@ -463,80 +463,101 @@ def capture_with_libcamera(filename):
         return None
 
 def build_libcamera_settings():
-    """Build libcamera-still settings from camera_settings - REVERTED: Keep working brightness fix"""
+    """Build libcamera-still settings from camera_settings for WYSIWYG capture"""
     settings = []
     
-    # CRITICAL FIX: Do NOT specify --width and --height 
+    # CRITICAL: Do NOT specify --width and --height 
     # libcamera-still defaults to HIGH RESOLUTION when no size specified
-    # Adding explicit size parameters was BREAKING high resolution capture
     
-    # CRITICAL FIX: Set high JPEG quality for still captures  
+    # JPEG quality
     jpeg_quality = camera_settings.get('jpeg_quality', 95)
     settings.extend(["--quality", str(jpeg_quality)])
-    logging.info(f"[STILL] JPEG Quality: {jpeg_quality}% (NO size params - libcamera default HIGH RES)")
+    logging.info(f"[STILL] JPEG Quality: {jpeg_quality}%")
     
-    # Apply camera settings (only if different from defaults)
-    # REVERTED: Keep working brightness calculation that fixed flip bug
-    gui_brightness = camera_settings.get('brightness', 0)  # GUI scale
+    # Brightness: GUI scale -100 to +100 (0 = neutral) → libcamera -1.0 to +1.0
+    gui_brightness = camera_settings.get('brightness', 0)
     if gui_brightness != 0:
-        # Convert GUI scale to libcamera scale (working version formula)
-        if -50 <= gui_brightness <= 50:
-            brightness_val = gui_brightness / 50.0
-            settings.extend(["--brightness", str(brightness_val)])
-            logging.info(f"[STILL] Brightness: GUI={gui_brightness} → libcamera={brightness_val:.2f}")
+        brightness_val = gui_brightness / 100.0
+        settings.extend(["--brightness", str(brightness_val)])
+        logging.info(f"[STILL] Brightness: GUI={gui_brightness} → libcamera={brightness_val:.2f}")
     
-    if camera_settings.get('contrast', 50) != 50:
-        contrast_val = camera_settings['contrast'] / 50.0
+    # Contrast: GUI 0-100 (50=neutral) → libcamera 0.0-2.0 (1.0=neutral)
+    contrast = camera_settings.get('contrast', 50)
+    if contrast != 50:
+        contrast_val = contrast / 50.0
         settings.extend(["--contrast", str(contrast_val)])
+        logging.info(f"[STILL] Contrast: GUI={contrast} → libcamera={contrast_val:.2f}")
     
-    if camera_settings.get('saturation', 50) != 50:
-        sat_val = camera_settings['saturation'] / 50.0
+    # Saturation: GUI 0-100 (50=neutral) → libcamera 0.0-2.0 (1.0=neutral)
+    saturation = camera_settings.get('saturation', 50)
+    if saturation != 50:
+        sat_val = saturation / 50.0
         settings.extend(["--saturation", str(sat_val)])
+        logging.info(f"[STILL] Saturation: GUI={saturation} → libcamera={sat_val:.2f}")
     
-    if camera_settings.get('iso', 100) != 100:
-        gain_val = camera_settings['iso'] / 100.0
+    # Sharpness: GUI 0-100 (50=neutral) → libcamera 0.0-2.0 (1.0=neutral)
+    sharpness = camera_settings.get('sharpness', 50)
+    if sharpness != 50:
+        sharp_val = sharpness / 50.0
+        settings.extend(["--sharpness", str(sharp_val)])
+        logging.info(f"[STILL] Sharpness: GUI={sharpness} → libcamera={sharp_val:.2f}")
+    
+    # ISO/Gain: GUI 100-3200 → libcamera gain 1.0-32.0
+    iso = camera_settings.get('iso', 400)
+    iso_auto = camera_settings.get('iso_auto', True)
+    if not iso_auto and iso != 100:
+        gain_val = iso / 100.0
         settings.extend(["--gain", str(gain_val)])
+        logging.info(f"[STILL] ISO: GUI={iso} → Gain={gain_val:.2f}")
     
     # White balance
-    wb_mode = camera_settings.get('white_balance', 'auto')
-    if wb_mode != 'auto':
-        settings.extend(["--awb", wb_mode])
+    wb_mode = camera_settings.get('wb_mode', 'Auto')
+    if wb_mode != 'Auto':
+        # Map to libcamera AWB modes
+        awb_map = {
+            'Daylight': 'daylight',
+            'Cloudy': 'cloudy', 
+            'Tungsten': 'tungsten',
+            'Fluorescent': 'fluorescent',
+            'Indoor': 'indoor',
+            'Incandescent': 'incandescent',
+        }
+        if wb_mode in awb_map:
+            settings.extend(["--awb", awb_map[wb_mode]])
+            logging.info(f"[STILL] White Balance: {wb_mode}")
     
-    # Shutter speed
-    if camera_settings.get('shutter_speed', 1000) != 1000:
-        settings.extend(["--shutter", str(camera_settings['shutter_speed'])])
-    
-    logging.info(f"[STILL] libcamera command will use DEFAULT HIGH RESOLUTION (no --width/--height)")
+    logging.info(f"[STILL] Built {len(settings)//2} libcamera settings")
     return settings
 
 def build_camera_controls():
-    """Build Picamera2 controls from settings - REVERTED: Keep working brightness conversion"""
+    """Build Picamera2 controls from settings for WYSIWYG capture"""
     controls = {"FrameRate": camera_settings.get('fps', 30)}
     
-    # Basic image controls
-    # REVERTED: Keep GUI brightness scale (-50 to +50 where 0 = neutral) that fixed flip bug
-    gui_brightness = camera_settings.get('brightness', 0)  # GUI default is 0 (neutral)
-    if gui_brightness != 0:
-        # Convert GUI scale (-50 to +50) to Picamera2 scale (-1.0 to +1.0)
-        # FIXED: Ensure proper range validation
-        if -50 <= gui_brightness <= 50:
-            brightness_val = gui_brightness / 50.0
-            controls["Brightness"] = brightness_val
-            logging.info(f"[STILL] Brightness: GUI={gui_brightness} → Picamera2={brightness_val:.2f}")
-        else:
-            logging.warning(f"[STILL] Invalid brightness {gui_brightness}, using neutral (0)")
+    # Brightness: GUI -100 to +100 (0=neutral) → Picamera2 0.0 to 2.0 (1.0=neutral)
+    brightness = camera_settings.get('brightness', 0)
+    libcam_brightness = (brightness + 100) / 100.0
+    controls["Brightness"] = libcam_brightness
     
-    if camera_settings.get('contrast', 50) != 50:
-        # Contrast: 0-100 GUI to Picamera2 scale
-        controls["Contrast"] = camera_settings['contrast'] / 50.0
-        
-    if camera_settings.get('saturation', 50) != 50:
-        # Saturation: 0-100 GUI to Picamera2 scale
-        controls["Saturation"] = camera_settings['saturation'] / 50.0
+    # Contrast: GUI 0-100 (50=neutral) → Picamera2 0.0-2.0 (1.0=neutral)
+    contrast = camera_settings.get('contrast', 50)
+    controls["Contrast"] = contrast / 50.0
     
-    # ISO/Gain controls
-    if camera_settings.get('iso', 100) != 100:
-        controls["AnalogueGain"] = camera_settings['iso'] / 100.0
+    # Saturation: GUI 0-100 (50=neutral) → Picamera2 0.0-2.0 (1.0=neutral)
+    saturation = camera_settings.get('saturation', 50)
+    controls["Saturation"] = saturation / 50.0
+    
+    # Sharpness: GUI 0-100 (50=neutral) → Picamera2 0.0-2.0 (1.0=neutral)
+    sharpness = camera_settings.get('sharpness', 50)
+    controls["Sharpness"] = sharpness / 50.0
+    
+    # ISO/Gain
+    iso = camera_settings.get('iso', 400)
+    iso_auto = camera_settings.get('iso_auto', True)
+    if not iso_auto:
+        controls["AnalogueGain"] = iso / 100.0
+        controls["AeEnable"] = False
+    else:
+        controls["AeEnable"] = True
     
     return controls
 

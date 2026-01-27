@@ -733,18 +733,22 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"Capturing camera {camera_id}...", 2000)
     
     def _on_camera_settings(self, camera_id: int, ip: str):
-        """Handle camera settings dialog"""
-        camera_name = f"REP{camera_id}"
-        print(f"\n⚙️ Opening settings for {camera_name} ({ip})")
-        dialog = CameraSettingsDialog(ip, camera_name, self)
-        dialog.settings_applied.connect(self._on_settings_applied)
-        dialog.exec()
-    
-    def _on_settings_applied(self, ip: str, settings: dict):
-        """Handle settings applied"""
-        print(f"  ✓ Settings applied for {ip}")
-        # Send settings to camera via NetworkManager
-        self.network_manager.send_settings(ip, settings)
+        """Handle camera settings button - opens comprehensive Camera Options"""
+        # Device names for display
+        device_names = {
+            "192.168.0.201": "REP1 - Ventral",
+            "192.168.0.202": "REP2 - Dorsal (RAW)",
+            "192.168.0.203": "REP3 - Left",
+            "192.168.0.204": "REP4 - Right",
+            "192.168.0.205": "REP5 - Head",
+            "192.168.0.206": "REP6 - Tail",
+            "192.168.0.207": "REP7 - Oblique",
+            "127.0.0.1": "REP8 - Lateral (RAW, Local)"
+        }
+        camera_name = device_names.get(ip, f"REP{camera_id}")
+        
+        # Open the new comprehensive Camera Options window
+        self._open_camera_options(ip, camera_name)
     
     def _on_capture_all(self):
         """Handle capture all - INSTANT preview thumbnails from video frames!

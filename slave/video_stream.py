@@ -297,65 +297,82 @@ def apply_frame_transforms(image_array, device_name):
         return image_array
 
 def build_camera_controls(device_name):
-    """Build ONLY camera hardware controls - MINIMAL APPROACH like rep8"""
+    """Build camera hardware controls from saved settings"""
     try:
         settings = load_device_settings(device_name)
         
-        logging.info(f"[CAMERA] Building MINIMAL controls for {device_name} (matching rep8)")
+        logging.info(f"[CAMERA] Building controls for {device_name}")
         
-        # MATCH REP8: Only set frame rate, let camera handle the rest
+        # Start with frame rate
         controls = {"FrameRate": settings.get('fps', 30)}
         
-        # DON'T set brightness, contrast, saturation, etc. initially
-        # Rep8 doesn't set these and works perfectly
-        # Let the camera use its defaults like rep8 does
-        
-        logging.info(f"[CAMERA] Using MINIMAL controls like rep8: {controls}")
-        return controls
-        
-        # Note: WYSIWYG handled by raw sensor config in create_video_configuration
-        # No need to set ScalerCrop here - full sensor usage forced via raw parameter
-        
-        # Apply brightness to camera hardware - ALWAYS set with correct conversion
-        brightness = settings.get('brightness', 0)  # GUI scale: -50 to +50, 0 = neutral
-        
-        # Convert GUI scale to libcamera: GUI -50→+50 becomes libcamera 0.0→2.0 where 1.0 = neutral
-        libcam_brightness = (brightness + 50) / 50.0  # GUI 0 → libcamera 1.0 (neutral)
+        # Apply brightness to camera hardware
+        # GUI scale: -100 to +100, 0 = neutral
+        # Picamera2 scale: 0.0 to 2.0, 1.0 = neutral
+        brightness = settings.get('brightness', 0)
+        libcam_brightness = (brightness + 100) / 100.0  # GUI 0 → Picamera2 1.0 (neutral)
         controls["Brightness"] = libcam_brightness
-        logging.info(f"[CAMERA] Hardware brightness for {device_name}: GUI={brightness} → libcamera={libcam_brightness:.2f} (1.0=neutral)")
+        logging.info(f"[CAMERA] Brightness for {device_name}: GUI={brightness} → Picamera2={libcam_brightness:.2f}")
         
-        # Other camera controls
+        # Contrast: GUI 0-100 (50=neutral) → Picamera2 0.0-2.0 (1.0=neutral)
         contrast = settings.get('contrast', 50)
-        if contrast != 50:
-            controls["Contrast"] = contrast / 50.0
-            
-        saturation = settings.get('saturation', 50)
-        if saturation != 50:
-            controls["Saturation"] = saturation / 50.0
+        libcam_contrast = contrast / 50.0
+        controls["Contrast"] = libcam_contrast
+        logging.info(f"[CAMERA] Contrast for {device_name}: GUI={contrast} → Picamera2={libcam_contrast:.2f}")
         
-        iso = settings.get('iso', 100)
-        if iso != 100:
-            controls["AnalogueGain"] = iso / 100.0
+        # Saturation: GUI 0-100 (50=neutral) → Picamera2 0.0-2.0 (1.0=neutral)
+        saturation = settings.get('saturation', 50)
+        libcam_saturation = saturation / 50.0
+        controls["Saturation"] = libcam_saturation
+        logging.info(f"[CAMERA] Saturation for {device_name}: GUI={saturation} → Picamera2={libcam_saturation:.2f}")
+        
+        # Sharpness: GUI 0-100 (50=neutral) → Picamera2 0.0-16.0 (1.0=neutral)
+        sharpness = settings.get('sharpness', 50)
+        libcam_sharpness = sharpness / 50.0  # Approximate - may need tuning
+        controls["Sharpness"] = libcam_sharpness
+        logging.info(f"[CAMERA] Sharpness for {device_name}: GUI={sharpness} → Picamera2={libcam_sharpness:.2f}")
+        
+        # ISO / Analogue Gain: GUI 100-3200 → Picamera2 1.0-32.0
+        iso = settings.get('iso', 400)
+        iso_auto = settings.get('iso_auto', True)
+        if not iso_auto:
+            libcam_gain = iso / 100.0
+            controls["AnalogueGain"] = libcam_gain
+            controls["AeEnable"] = False  # Disable auto exposure when manual ISO
+            logging.info(f"[CAMERA] ISO for {device_name}: GUI={iso} → Gain={libcam_gain:.2f} (Manual)")
+        else:
+            controls["AeEnable"] = True
+            logging.info(f"[CAMERA] ISO for {device_name}: Auto")
         
         # White balance
-        wb_mode = settings.get('white_balance', 'auto')
-        if wb_mode == 'auto':
+        wb_mode = settings.get('wb_mode', 'Auto')
+        if wb_mode == 'Auto':
             controls["AwbEnable"] = True
+            logging.info(f"[CAMERA] White Balance for {device_name}: Auto")
         else:
             controls["AwbEnable"] = False
+            # Manual white balance gains
             wb_gains = {
-                'daylight': (1.5, 1.2),
-                'cloudy': (1.8, 1.0),
-                'tungsten': (1.0, 2.0),
-                'fluorescent': (1.8, 1.5)
+                'Daylight': (1.5, 1.2),
+                'Cloudy': (1.8, 1.0),
+                'Tungsten': (1.0, 2.0),
+                'Fluorescent': (1.8, 1.5),
+                'Indoor': (1.4, 1.6),
+                'Incandescent': (1.0, 1.8),
             }
             if wb_mode in wb_gains:
                 controls["ColourGains"] = wb_gains[wb_mode]
+                logging.info(f"[CAMERA] White Balance for {device_name}: {wb_mode} → Gains={wb_gains[wb_mode]}")
         
-        # IMPORTANT: NO flip, rotation, crop, or grayscale in camera controls
-        # These are handled in apply_frame_transforms()
+        # Manual color gains (if enabled)
+        if settings.get('manual_gains', False):
+            red_gain = settings.get('red_gain', 1.5)
+            blue_gain = settings.get('blue_gain', 1.2)
+            controls["ColourGains"] = (red_gain, blue_gain)
+            controls["AwbEnable"] = False
+            logging.info(f"[CAMERA] Manual Gains for {device_name}: R={red_gain}, B={blue_gain}")
         
-        logging.info(f"[CAMERA] Controls for {device_name}: {len(controls)} hardware settings")
+        logging.info(f"[CAMERA] Built {len(controls)} controls for {device_name}")
         return controls
         
     except Exception as e:
