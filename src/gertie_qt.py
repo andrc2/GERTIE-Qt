@@ -28,6 +28,7 @@ from PySide6.QtGui import QPixmap, QImage
 from network_manager import NetworkManager
 from gallery_panel import GalleryPanel
 from camera_settings_dialog import CameraSettingsDialog
+from camera_options_window import CameraOptionsWindow
 from config import get_ip_from_camera_id, SLAVES
 from audio_feedback import play_capture_sound, set_audio_enabled
 
@@ -396,8 +397,34 @@ class MainWindow(QMainWindow):
         file_menu = menubar.addMenu("&File")
         file_menu.addAction("E&xit", self.close, "Ctrl+Q")
         
+        # === Settings Menu ===
+        settings_menu = menubar.addMenu("&Settings")
+        
+        # Camera Options submenu (per camera)
+        camera_options_menu = settings_menu.addMenu("📷 Camera Options")
+        
+        # Device names mapping
+        device_names = {
+            "192.168.0.201": "REP1 - Ventral",
+            "192.168.0.202": "REP2 - Dorsal (RAW)",
+            "192.168.0.203": "REP3 - Left",
+            "192.168.0.204": "REP4 - Right",
+            "192.168.0.205": "REP5 - Head",
+            "192.168.0.206": "REP6 - Tail",
+            "192.168.0.207": "REP7 - Oblique",
+            "127.0.0.1": "REP8 - Lateral (RAW, Local)"
+        }
+        
+        for name, config in SLAVES.items():
+            ip = config["ip"]
+            display_name = device_names.get(ip, name)
+            camera_options_menu.addAction(
+                display_name,
+                lambda checked=False, ip=ip, name=display_name: self._open_camera_options(ip, name)
+            )
+        
         # === System Controls Menu ===
-        system_menu = menubar.addMenu("&System Controls")
+        system_menu = menubar.addMenu("S&ystem Controls")
         
         # Global controls
         system_menu.addAction("🔄 Restart All Streams", self._restart_all_streams)
@@ -571,6 +598,56 @@ class MainWindow(QMainWindow):
 <p>RAW-enabled cameras: REP2 (Dorsal), REP8 (Lateral)</p>
 """
         QMessageBox.about(self, "About GERTIE", about)
+    
+    def _open_camera_options(self, ip: str, camera_name: str):
+        """Open the comprehensive Camera Options window for a specific camera"""
+        gui_logger.info(f"[OPTIONS] Opening camera options for {camera_name} ({ip})")
+        
+        dialog = CameraOptionsWindow(ip, camera_name, self.network_manager, self)
+        dialog.settings_changed.connect(self._on_camera_options_applied)
+        dialog.exec()
+    
+    def _on_camera_options_applied(self, ip: str, settings: dict):
+        """Handle camera options being applied"""
+        gui_logger.info(f"[OPTIONS] Settings applied for {ip}: {len(settings)} options")
+        
+        # Send settings to camera via network manager
+        if self.network_manager:
+            # Convert new settings format to network commands
+            self._send_camera_options_to_slave(ip, settings)
+    
+    def _send_camera_options_to_slave(self, ip: str, settings: dict):
+        """Convert camera options to network commands and send to slave"""
+        # Build settings dict compatible with existing network protocol
+        network_settings = {
+            'brightness': settings.get('brightness', 0),
+            'contrast': settings.get('contrast', 50),
+            'saturation': settings.get('saturation', 50),
+            'iso': settings.get('iso', 400),
+            'sharpness': settings.get('sharpness', 50),
+            'jpeg_quality': settings.get('jpeg_quality', 95),
+            'flip_horizontal': settings.get('flip_horizontal', False),
+            'flip_vertical': settings.get('flip_vertical', False),
+            'rotation': settings.get('rotation', 0),
+            'grayscale': settings.get('grayscale', False),
+            'raw_enabled': settings.get('raw_enabled', False),
+            'wb_mode': settings.get('wb_mode', 'Auto'),
+            'fps': settings.get('fps', 30),
+        }
+        
+        # Add crop if enabled
+        if settings.get('crop_enabled', False):
+            network_settings['crop_enabled'] = True
+            network_settings['crop_x'] = settings.get('crop_x', 0)
+            network_settings['crop_y'] = settings.get('crop_y', 0)
+            network_settings['crop_width'] = settings.get('crop_width', 4056)
+            network_settings['crop_height'] = settings.get('crop_height', 3040)
+        else:
+            network_settings['crop_enabled'] = False
+        
+        # Send via network manager
+        self.network_manager.send_settings(ip, network_settings)
+        gui_logger.info(f"[OPTIONS] Sent {len(network_settings)} settings to {ip}")
     
     def _update_frames(self):
         """Update camera frames - decode and display only dirty frames
