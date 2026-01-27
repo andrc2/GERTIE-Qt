@@ -74,6 +74,7 @@ camera_settings = {
     'fps': 30,                  # frame rate
     'resolution': '4056x3040',  # 4:3 full HQ sensor (NOT 4608x2592 which is 16:9 crop!)
     'image_format': 'JPEG',     # JPEG/PNG/BMP/TIFF
+    'raw_enabled': False,       # RAW capture (DNG) - for rep2/rep8 only
     
     # Transform settings (NEW - universal for all cameras)
     'crop_enabled': False,
@@ -100,6 +101,7 @@ ORIGINAL_DEFAULTS = {
     'fps': 30,
     'resolution': '4056x3040',  # 4:3 full HQ sensor (NOT 4608x2592 which is 16:9!)
     'image_format': 'JPEG',
+    'raw_enabled': False,       # RAW capture (DNG) - for rep2/rep8 only
     'crop_enabled': False,
     'crop_x': 0,
     'crop_y': 0,
@@ -236,24 +238,108 @@ def apply_rotation(image, degrees):
         return image
 
 def capture_image():
-    """Universal enhanced capture with all transforms - SIMPLIFIED PROCESSING PATH"""
+    """Universal enhanced capture with all transforms - SIMPLIFIED PROCESSING PATH
+    
+    Returns:
+        For standard capture: filename (str) or None
+        For RAW capture: (jpeg_filename, dng_filename) tuple or None
+    """
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # Generate device-specific filename
     device_name = get_device_name()
-    filename = os.path.join(SAVE_DIR, f"{device_name}_{timestamp}.jpg")
+    jpeg_filename = os.path.join(SAVE_DIR, f"{device_name}_{timestamp}.jpg")
     os.makedirs(SAVE_DIR, exist_ok=True)
+    
+    # Check if RAW capture is enabled
+    raw_enabled = camera_settings.get('raw_enabled', False)
 
     try:
-        # FIXED: Always use SIMPLIFIED processing path for guaranteed high resolution
-        # The processing path now uses the SIMPLE working logic from slave201
-        # No more complex isolation logic that was interfering with capture
-        
-        logging.info(f"[SLAVE] {device_name}: Using SIMPLIFIED processing path for high resolution")
-        return capture_with_processing(filename)
+        if raw_enabled:
+            # RAW capture path - uses libcamera-still with --raw flag
+            dng_filename = os.path.join(SAVE_DIR, f"{device_name}_{timestamp}.dng")
+            logging.info(f"[SLAVE] {device_name}: RAW capture enabled - capturing JPEG + DNG")
+            result = capture_with_raw(jpeg_filename, dng_filename)
+            if result:
+                return result  # Returns (jpeg_filename, dng_filename) tuple
+            return None
+        else:
+            # Standard JPEG-only capture path
+            logging.info(f"[SLAVE] {device_name}: Using SIMPLIFIED processing path for high resolution")
+            return capture_with_processing(jpeg_filename)
         
     except Exception as e:
         logging.error(f"Error in capture_image: {e}")
+        return None
+
+
+def capture_with_raw(jpeg_filename, dng_filename):
+    """Capture RAW (DNG) + JPEG using libcamera-still --raw flag
+    
+    Args:
+        jpeg_filename: Path for JPEG output
+        dng_filename: Path for DNG output (libcamera creates this automatically)
+    
+    Returns:
+        (jpeg_filename, dng_filename) tuple on success, None on failure
+    """
+    device_name = get_device_name()
+    logging.info(f"[SLAVE] {device_name}: Starting RAW capture...")
+    
+    # Build libcamera-still command with --raw flag
+    # Note: libcamera-still creates DNG file with same basename as JPEG
+    command = [
+        "libcamera-still",
+        "--nopreview",
+        "-o", jpeg_filename,
+        "--raw",           # This creates the DNG file
+        "--timeout", "2000",
+        "--quality", str(camera_settings.get('jpeg_quality', 95))
+    ]
+    
+    # Add camera settings
+    libcamera_settings = build_libcamera_settings()
+    command.extend(libcamera_settings)
+    
+    logging.info(f"[SLAVE] {device_name}: RAW command: {' '.join(command)}")
+    
+    try:
+        result = subprocess.run(command, timeout=30, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logging.error(f"[SLAVE] libcamera-still RAW failed: {result.stderr}")
+            return None
+        
+        # libcamera-still creates DNG with same name but .dng extension
+        # The actual DNG path is jpeg_filename with .dng extension
+        actual_dng = jpeg_filename.rsplit('.', 1)[0] + '.dng'
+        
+        # Verify both files exist
+        jpeg_exists = os.path.exists(jpeg_filename)
+        dng_exists = os.path.exists(actual_dng)
+        
+        if jpeg_exists and dng_exists:
+            jpeg_size = os.path.getsize(jpeg_filename)
+            dng_size = os.path.getsize(actual_dng)
+            logging.info(f"[SLAVE] ✅ RAW capture success:")
+            logging.info(f"[SLAVE]    JPEG: {jpeg_filename} ({jpeg_size/1024:.0f}KB)")
+            logging.info(f"[SLAVE]    DNG:  {actual_dng} ({dng_size/1024/1024:.1f}MB)")
+            
+            # Rename DNG to expected filename if different
+            if actual_dng != dng_filename:
+                os.rename(actual_dng, dng_filename)
+                logging.info(f"[SLAVE]    Renamed DNG to: {dng_filename}")
+            
+            return (jpeg_filename, dng_filename)
+        else:
+            logging.error(f"[SLAVE] RAW capture incomplete: JPEG={jpeg_exists}, DNG={dng_exists}")
+            return None
+            
+    except subprocess.TimeoutExpired:
+        logging.error(f"[SLAVE] RAW capture timeout (30s)")
+        return None
+    except Exception as e:
+        logging.error(f"[SLAVE] RAW capture error: {e}")
         return None
 
 def capture_with_processing(filename):
@@ -487,17 +573,27 @@ def capture_still():
             logging.warning(f"[SLAVE] Unable to send STOP_STREAM before capture: {e}")
 
         # Now capture with completely isolated camera
-        filename = capture_image()
-        if filename:
-            success = send_image(filename)
-            if success:
-                logging.info("[SLAVE] Still capture completed successfully")
-                return True
-            else:
-                logging.error("[SLAVE] Failed to send image")
-                return False
-        else:
+        result = capture_image()
+        
+        # Handle RAW capture (returns tuple) vs standard capture (returns string)
+        if result is None:
             logging.error("[SLAVE] Failed to capture image")
+            return False
+        
+        if isinstance(result, tuple):
+            # RAW capture - send both JPEG and DNG
+            jpeg_filename, dng_filename = result
+            logging.info(f"[SLAVE] RAW capture: sending JPEG + DNG")
+            success = send_raw_files(jpeg_filename, dng_filename)
+        else:
+            # Standard JPEG capture
+            success = send_image(result)
+        
+        if success:
+            logging.info("[SLAVE] Still capture completed successfully")
+            return True
+        else:
+            logging.error("[SLAVE] Failed to send image(s)")
             return False
     except Exception as e:
         logging.error(f"[SLAVE] Error during still capture: {e}")
@@ -540,6 +636,61 @@ def send_image(filename):
             
     except Exception as e:
         logging.error(f"[SLAVE] Error sending image: {e}")
+        return False
+
+
+def send_raw_files(jpeg_filename, dng_filename):
+    """Send RAW capture files (JPEG + DNG) to master via TCP
+    
+    Protocol:
+    1. Send 4-byte header: "RAW1" to indicate RAW transfer
+    2. Send 4-byte JPEG size (big-endian)
+    3. Send JPEG data
+    4. Send 4-byte DNG size (big-endian)
+    5. Send DNG data
+    
+    This allows master to receive both files in one connection.
+    """
+    try:
+        local_ip = get_real_local_ip()
+        ports = get_slave_ports(local_ip)
+        still_port = ports['still']
+        
+        # Read both files
+        with open(jpeg_filename, "rb") as f:
+            jpeg_data = f.read()
+        with open(dng_filename, "rb") as f:
+            dng_data = f.read()
+        
+        jpeg_size = len(jpeg_data)
+        dng_size = len(dng_data)
+        total_size = jpeg_size + dng_size
+        
+        logging.info(f"[SLAVE] RAW transfer: JPEG={jpeg_size/1024:.0f}KB, DNG={dng_size/1024/1024:.1f}MB, Total={total_size/1024/1024:.1f}MB")
+        
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(120.0)  # Extended timeout for large DNG files
+            sock.connect((MASTER_IP, still_port))
+            logging.info(f"[SLAVE] RAW transfer connecting to {MASTER_IP}:{still_port}")
+            
+            # Send protocol header
+            sock.sendall(b"RAW1")
+            
+            # Send JPEG size and data
+            sock.sendall(jpeg_size.to_bytes(4, 'big'))
+            sock.sendall(jpeg_data)
+            logging.info(f"[SLAVE] JPEG sent: {jpeg_size} bytes")
+            
+            # Send DNG size and data
+            sock.sendall(dng_size.to_bytes(4, 'big'))
+            sock.sendall(dng_data)
+            logging.info(f"[SLAVE] DNG sent: {dng_size} bytes")
+            
+            logging.info(f"[SLAVE] ✅ RAW transfer complete: {total_size/1024/1024:.1f}MB total")
+            return True
+            
+    except Exception as e:
+        logging.error(f"[SLAVE] Error sending RAW files: {e}")
         return False
 
 def handle_control_commands():
@@ -772,6 +923,9 @@ def handle_camera_setting(command):
             camera_settings[setting] = int(value)
         elif setting in ['white_balance', 'exposure_mode', 'resolution', 'image_format']:
             camera_settings[setting] = value
+        elif setting == 'raw_enabled':
+            camera_settings['raw_enabled'] = value.lower() == 'true'
+            logging.info(f"[SLAVE] RAW capture {'ENABLED' if camera_settings['raw_enabled'] else 'DISABLED'}")
         else:
             camera_settings[setting] = value
             
