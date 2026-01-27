@@ -344,6 +344,7 @@ def capture_with_raw(jpeg_filename, dng_filename):
 
 def capture_with_processing(filename):
     """Capture image with full processing pipeline - WITH RETRY FOR CAMERA ACCESS"""
+    device_name = get_device_name()  # Get device name for logging
     max_retries = 5
     retry_delay = 2.0  # seconds between retries
     
