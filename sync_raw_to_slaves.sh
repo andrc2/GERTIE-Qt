@@ -36,8 +36,12 @@ echo -e "${YELLOW}━━━ REP2 (192.168.0.202 - Dorsal) ━━━${NC}"
 if ping -c 1 -W 2 192.168.0.202 > /dev/null 2>&1; then
     echo -e "  ${GREEN}✓ Reachable${NC}"
     
-    # Sync Qt slave code
+    # Sync Qt slave code (BOTH video_stream.py AND still_capture.py)
     echo -e "  Syncing Qt slave code..."
+    scp -o ConnectTimeout=5 "$QT_DIR/slave/video_stream.py" "$REMOTE_USER@192.168.0.202:$QT_DIR/slave/" 2>/dev/null && \
+        echo -e "  ${GREEN}✓ video_stream.py synced${NC}" || \
+        echo -e "  ${RED}✗ Failed to sync video_stream.py${NC}"
+    
     scp -o ConnectTimeout=5 "$QT_DIR/slave/still_capture.py" "$REMOTE_USER@192.168.0.202:$QT_DIR/slave/" 2>/dev/null && \
         echo -e "  ${GREEN}✓ still_capture.py synced${NC}" || \
         echo -e "  ${RED}✗ Failed to sync still_capture.py${NC}"
@@ -50,6 +54,39 @@ if ping -c 1 -W 2 192.168.0.202 > /dev/null 2>&1; then
     # Check which service is running (Tkinter or Qt)
     ACTIVE_SERVICE=$(ssh -o ConnectTimeout=5 "$REMOTE_USER@192.168.0.202" "systemctl is-active still_capture.service 2>/dev/null || systemctl is-active gertie-capture.service 2>/dev/null || echo 'none'" 2>/dev/null)
     echo -e "  Active capture service: $ACTIVE_SERVICE"
+    
+    # Update video_stream.service to use Qt code path (MUST match still_capture path)
+    echo -e "  Updating video_stream.service to use Qt code..."
+    ssh -o ConnectTimeout=5 "$REMOTE_USER@192.168.0.202" "cat > /tmp/video_stream.service << 'EOF'
+[Unit]
+Description=Video Stream Service (Qt)
+After=network.target
+
+[Service]
+Type=simple
+User=andrc1
+Group=andrc1
+WorkingDirectory=/home/andrc1/camera_system_qt_conversion
+ExecStart=/usr/bin/python3 /home/andrc1/camera_system_qt_conversion/slave/video_stream.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONPATH=/home/andrc1/camera_system_qt_conversion
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo cp /tmp/video_stream.service /etc/systemd/system/video_stream.service
+sudo systemctl daemon-reload
+sudo systemctl restart video_stream.service" 2>/dev/null && \
+        echo -e "  ${GREEN}✓ video_stream.service updated${NC}" || \
+        echo -e "  ${RED}✗ Failed to update video_stream.service${NC}"
+    
+    sleep 2
+    VIDEO_STATUS=$(ssh -o ConnectTimeout=5 "$REMOTE_USER@192.168.0.202" "systemctl is-active video_stream.service" 2>/dev/null || echo "failed")
+    echo -e "  video_stream.service: $VIDEO_STATUS"
     
     # Update the still_capture.service to use Qt code path
     echo -e "  Updating service to use Qt slave code..."
