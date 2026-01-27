@@ -371,14 +371,13 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         
-        # Add shortcuts as permanent widget in status bar (left side)
+        # Add shortcuts as widget on LEFT side of status bar
         shortcuts_label = QLabel(
-            "⌨️ <b>Space</b> Capture | <b>1-8</b> Focus | <b>Esc</b> All | "
-            "<b>S</b> Settings | <b>G</b> Gallery | <b>R</b> Restart | <b>Q</b> Quit"
+            "⌨️ Space=Capture | 1-8=Focus | Esc=All | S=Settings | G=Gallery | R=Restart | Q=Quit"
         )
-        shortcuts_label.setStyleSheet("color: #888; font-size: 10px;")
-        self.status_bar.addPermanentWidget(shortcuts_label)
-        self.status_bar.showMessage("Ready")
+        shortcuts_label.setStyleSheet("color: #aaa; font-size: 11px; padding: 2px 5px;")
+        self.status_bar.addWidget(shortcuts_label, 1)  # stretch=1 to take available space
+        self.status_bar.showMessage("")  # Clear default message
     
     def _setup_menu_bar(self):
         """Setup menu bar with System Controls"""
