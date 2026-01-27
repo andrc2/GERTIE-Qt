@@ -18,7 +18,8 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QGridLayout, 
     QLabel, QVBoxLayout, QHBoxLayout, QStatusBar, 
-    QPushButton, QSplitter, QProgressBar, QSizePolicy
+    QPushButton, QSplitter, QProgressBar, QSizePolicy,
+    QMenuBar, QMenu, QMessageBox
 )
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QPixmap, QImage
@@ -251,6 +252,9 @@ class MainWindow(QMainWindow):
     
     def _setup_ui(self):
         """Setup UI with splitter for camera/gallery"""
+        # Setup menu bar
+        self._setup_menu_bar()
+        
         central = QWidget()
         self.setCentralWidget(central)
         
@@ -366,6 +370,190 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready")
+    
+    def _setup_menu_bar(self):
+        """Setup menu bar with System Controls"""
+        menubar = self.menuBar()
+        
+        # === File Menu ===
+        file_menu = menubar.addMenu("&File")
+        file_menu.addAction("E&xit", self.close, "Ctrl+Q")
+        
+        # === System Controls Menu ===
+        system_menu = menubar.addMenu("&System Controls")
+        
+        # Global controls
+        system_menu.addAction("🔄 Restart All Streams", self._restart_all_streams)
+        system_menu.addSeparator()
+        system_menu.addAction("🔁 Reboot All Devices", self._reboot_all_devices)
+        system_menu.addAction("⏻ Shutdown All Devices", self._shutdown_all_devices)
+        system_menu.addSeparator()
+        
+        # Individual device controls submenu
+        device_menu = system_menu.addMenu("Individual Device Controls")
+        
+        # Device names mapping
+        device_names = {
+            "192.168.0.201": "REP1 - Ventral",
+            "192.168.0.202": "REP2 - Dorsal (RAW)",
+            "192.168.0.203": "REP3 - Left",
+            "192.168.0.204": "REP4 - Right",
+            "192.168.0.205": "REP5 - Head",
+            "192.168.0.206": "REP6 - Tail",
+            "192.168.0.207": "REP7 - Oblique",
+            "127.0.0.1": "REP8 - Lateral (RAW, Local)"
+        }
+        
+        for name, config in SLAVES.items():
+            ip = config["ip"]
+            is_local = config.get("local", False)
+            display_name = device_names.get(ip, name)
+            
+            # Create submenu for each device
+            device_submenu = device_menu.addMenu(display_name)
+            
+            # Restart stream (always available)
+            device_submenu.addAction("🔄 Restart Stream", 
+                lambda checked=False, ip=ip: self._restart_device_stream(ip))
+            
+            # Reboot and shutdown (not for local)
+            if not is_local:
+                device_submenu.addSeparator()
+                device_submenu.addAction("🔁 Reboot", 
+                    lambda checked=False, ip=ip: self._reboot_device(ip))
+                device_submenu.addAction("⏻ Shutdown", 
+                    lambda checked=False, ip=ip: self._shutdown_device(ip))
+            else:
+                device_submenu.addSeparator()
+                device_submenu.addAction("(Local - no reboot/shutdown)")
+        
+        # === Help Menu ===
+        help_menu = menubar.addMenu("&Help")
+        help_menu.addAction("⌨️ Keyboard Shortcuts", self._show_shortcuts_help)
+        help_menu.addAction("ℹ️ About GERTIE", self._show_about)
+    
+    def _restart_all_streams(self):
+        """Restart video streams on all cameras"""
+        reply = QMessageBox.question(
+            self, "Confirm Restart",
+            "Restart video streams on all cameras?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            gui_logger.info("[SYSTEM] Restarting all video streams")
+            self.status_bar.showMessage("Restarting all streams...")
+            
+            for name, config in SLAVES.items():
+                ip = config["ip"]
+                self.network_manager.send_restart_stream(ip)
+            
+            self.status_bar.showMessage("Stream restart commands sent", 3000)
+    
+    def _reboot_all_devices(self):
+        """Reboot all remote camera Pis"""
+        reply = QMessageBox.warning(
+            self, "⚠️ Confirm Reboot ALL",
+            "Reboot ALL remote camera devices?\n\n"
+            "This will take ~60 seconds for cameras to come back online.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            gui_logger.warning("[SYSTEM] Rebooting ALL remote devices")
+            self.status_bar.showMessage("Sending reboot to all devices...")
+            
+            for name, config in SLAVES.items():
+                if not config.get("local", False):
+                    self.network_manager.send_reboot(config["ip"])
+            
+            QMessageBox.information(self, "Reboot", 
+                "Reboot commands sent to all remote devices.\n"
+                "Please wait ~60 seconds for cameras to reconnect.")
+            self.status_bar.showMessage("Reboot commands sent", 5000)
+    
+    def _shutdown_all_devices(self):
+        """Shutdown all remote camera Pis"""
+        reply = QMessageBox.warning(
+            self, "⚠️ Confirm Shutdown ALL",
+            "Shutdown ALL remote camera devices?\n\n"
+            "⚠️ You will need physical access to power them back on!",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            gui_logger.warning("[SYSTEM] Shutting down ALL remote devices")
+            self.status_bar.showMessage("Sending shutdown to all devices...")
+            
+            for name, config in SLAVES.items():
+                if not config.get("local", False):
+                    self.network_manager.send_shutdown(config["ip"])
+            
+            QMessageBox.information(self, "Shutdown", 
+                "Shutdown commands sent to all remote devices.\n"
+                "Physical power cycle required to restart.")
+            self.status_bar.showMessage("Shutdown commands sent", 5000)
+    
+    def _restart_device_stream(self, ip: str):
+        """Restart stream on individual device"""
+        camera_id = self.network_manager.get_camera_id_from_ip(ip) if hasattr(self.network_manager, 'get_camera_id_from_ip') else 0
+        gui_logger.info(f"[SYSTEM] Restarting stream for {ip}")
+        self.network_manager.send_restart_stream(ip)
+        self.status_bar.showMessage(f"Restart stream sent to {ip}", 3000)
+    
+    def _reboot_device(self, ip: str):
+        """Reboot individual device"""
+        reply = QMessageBox.question(
+            self, "Confirm Reboot",
+            f"Reboot device at {ip}?\n\nThis will take ~60 seconds.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            gui_logger.warning(f"[SYSTEM] Rebooting {ip}")
+            self.network_manager.send_reboot(ip)
+            self.status_bar.showMessage(f"Reboot sent to {ip}", 3000)
+    
+    def _shutdown_device(self, ip: str):
+        """Shutdown individual device"""
+        reply = QMessageBox.warning(
+            self, "⚠️ Confirm Shutdown",
+            f"Shutdown device at {ip}?\n\n"
+            "⚠️ Physical power cycle required to restart!",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            gui_logger.warning(f"[SYSTEM] Shutting down {ip}")
+            self.network_manager.send_shutdown(ip)
+            self.status_bar.showMessage(f"Shutdown sent to {ip}", 3000)
+    
+    def _show_shortcuts_help(self):
+        """Show keyboard shortcuts help dialog"""
+        shortcuts = """
+<h3>GERTIE Keyboard Shortcuts</h3>
+<table>
+<tr><td><b>Space</b></td><td>Capture all cameras</td></tr>
+<tr><td><b>C</b></td><td>Capture all cameras (alternate)</td></tr>
+<tr><td><b>1-8</b></td><td>Toggle camera preview (exclusive mode)</td></tr>
+<tr><td><b>Escape</b></td><td>Show all cameras (exit exclusive)</td></tr>
+<tr><td><b>R</b></td><td>Restart all streams</td></tr>
+<tr><td><b>S</b></td><td>Open camera settings</td></tr>
+<tr><td><b>G</b></td><td>Toggle gallery panel</td></tr>
+<tr><td><b>Q</b></td><td>Quit application</td></tr>
+</table>
+<br>
+<b>Capture Buttons:</b> Click 📷 on any camera for individual capture.
+"""
+        QMessageBox.information(self, "Keyboard Shortcuts", shortcuts)
+    
+    def _show_about(self):
+        """Show about dialog"""
+        about = """
+<h2>GERTIE Qt</h2>
+<p><b>G</b>uided <b>E</b>ntomological <b>R</b>apid <b>T</b>axonomic <b>I</b>maging <b>E</b>quipment</p>
+<p>Version: Qt Conversion (2026)</p>
+<p>Natural History Museum London</p>
+<hr>
+<p>8-camera specimen digitisation system with RAW capture support.</p>
+<p>RAW-enabled cameras: REP2 (Dorsal), REP8 (Lateral)</p>
+"""
+        QMessageBox.about(self, "About GERTIE", about)
     
     def _update_frames(self):
         """Update camera frames - decode and display only dirty frames
