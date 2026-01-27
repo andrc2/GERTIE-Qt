@@ -62,11 +62,21 @@ class AudioFeedback:
         # No sound file found - will use system beep
         return None
     
-    def play_capture_sound(self):
-        """Play capture sound effect (non-blocking)"""
+    def play_capture_sound(self, count: int = 1):
+        """Play capture sound effect (non-blocking)
+        
+        Args:
+            count: Number of rapid shutter sounds to play (for burst capture)
+        """
         if not self.enabled:
             return
-            
+        
+        # Play multiple sounds in rapid succession for burst capture
+        for i in range(count):
+            self._play_single_sound()
+    
+    def _play_single_sound(self):
+        """Play a single shutter sound (internal)"""
         try:
             if self.sound_file and os.path.exists(self.sound_file):
                 # Play sound file
@@ -128,9 +138,13 @@ def get_audio() -> AudioFeedback:
     return _audio_instance
 
 
-def play_capture_sound():
-    """Convenience function - play capture shutter sound"""
-    get_audio().play_capture_sound()
+def play_capture_sound(count: int = 1):
+    """Convenience function - play capture shutter sound(s)
+    
+    Args:
+        count: Number of rapid shutter sounds (default 1, use 8 for Capture All)
+    """
+    get_audio().play_capture_sound(count)
 
 
 def set_audio_enabled(enabled: bool):

@@ -367,22 +367,18 @@ class MainWindow(QMainWindow):
         
         main_layout.addWidget(self.splitter)
         
-        # Keyboard shortcuts help bar
+        # Keyboard shortcuts help bar - compact single line
         shortcuts_bar = QLabel(
-            "  ⌨️ <b>Space</b> Capture All  |  "
-            "<b>1-8</b> Focus Camera  |  "
-            "<b>Esc</b> Show All  |  "
-            "<b>S</b> Settings  |  "
-            "<b>G</b> Gallery  |  "
-            "<b>R</b> Restart  |  "
-            "<b>Q</b> Quit"
+            "⌨️ <b>Space</b> Capture | <b>1-8</b> Focus | <b>Esc</b> All | "
+            "<b>S</b> Settings | <b>G</b> Gallery | <b>R</b> Restart | <b>Q</b> Quit"
         )
+        shortcuts_bar.setFixedHeight(22)
         shortcuts_bar.setStyleSheet("""
             QLabel {
                 background-color: #2a2a2a;
-                color: #aaa;
-                padding: 4px 8px;
-                font-size: 11px;
+                color: #888;
+                padding: 2px 8px;
+                font-size: 10px;
             }
         """)
         main_layout.addWidget(shortcuts_bar)
@@ -680,8 +676,8 @@ class MainWindow(QMainWindow):
         Smaller chunks when busy = GUI stays responsive.
         """
         
-        # Play shutter sound (non-blocking)
-        play_capture_sound()
+        # Play 8 rapid shutter sounds for all cameras (non-blocking)
+        play_capture_sound(8)
         
         # Queue depth protection - allow multiple captures but limit queue
         MAX_PENDING = 24  # Max 24 hi-res images in flight (3 batches)
