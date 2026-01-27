@@ -203,6 +203,42 @@ class CameraSettingsDialog(QDialog):
         crop_group.setLayout(crop_layout)
         scroll_layout.addWidget(crop_group)
         
+        # === RAW CAPTURE SETTINGS ===
+        # Only show for RAW-capable cameras (rep2, rep8)
+        self.raw_group = None
+        if self._is_raw_capable():
+            raw_group = QGroupBox("RAW Capture (DNG)")
+            raw_layout = QVBoxLayout()
+            
+            # RAW Enabled toggle
+            self.raw_enabled_checkbox = QCheckBox("Enable RAW Capture")
+            self.raw_enabled_checkbox.setStyleSheet("""
+                QCheckBox {
+                    color: #f90;
+                    font-weight: bold;
+                    font-size: 13px;
+                }
+                QCheckBox::indicator {
+                    width: 18px;
+                    height: 18px;
+                }
+            """)
+            self.raw_enabled_checkbox.setToolTip(
+                "When enabled, captures both DNG (RAW) and JPEG files.\n"
+                "DNG files are ~23MB and take longer to transfer.\n"
+                "JPEG is used for gallery preview."
+            )
+            raw_layout.addWidget(self.raw_enabled_checkbox)
+            
+            # Info label
+            raw_info = QLabel("📷 Captures JPEG (~2MB) + DNG (~23MB)")
+            raw_info.setStyleSheet("color: #888; font-size: 11px; margin-left: 20px;")
+            raw_layout.addWidget(raw_info)
+            
+            raw_group.setLayout(raw_layout)
+            scroll_layout.addWidget(raw_group)
+            self.raw_group = raw_group
+        
         scroll_layout.addStretch()
         
         scroll.setWidget(scroll_content)
@@ -257,6 +293,11 @@ class CameraSettingsDialog(QDialog):
             lambda v: self.brightness_label.setText(str(v))
         )
     
+    def _is_raw_capable(self):
+        """Check if this camera is RAW-capable (rep2 or rep8)"""
+        # rep2 = 192.168.0.202 (dorsal), rep8 = 127.0.0.1 (lateral)
+        return self.ip in ("192.168.0.202", "127.0.0.1")
+    
     def _load_values(self):
         """Load saved values into UI widgets"""
         self.iso_slider.setValue(self.settings.get("iso", 400))
@@ -274,6 +315,10 @@ class CameraSettingsDialog(QDialog):
         self.crop_y_spin.setValue(self.settings.get("crop_y", 0))
         self.crop_w_spin.setValue(self.settings.get("crop_width", 100))
         self.crop_h_spin.setValue(self.settings.get("crop_height", 100))
+        
+        # RAW capture setting (only for capable cameras)
+        if self._is_raw_capable() and hasattr(self, 'raw_enabled_checkbox'):
+            self.raw_enabled_checkbox.setChecked(self.settings.get("raw_enabled", False))
     
     def get_settings_filename(self):
         """Get settings filename for this camera"""
@@ -325,6 +370,10 @@ class CameraSettingsDialog(QDialog):
             "crop_width": self.crop_w_spin.value(),
             "crop_height": self.crop_h_spin.value(),
         }
+        
+        # Add RAW setting if this camera is RAW-capable
+        if self._is_raw_capable() and hasattr(self, 'raw_enabled_checkbox'):
+            settings_dict["raw_enabled"] = self.raw_enabled_checkbox.isChecked()
         
         # Save to file
         self.save_camera_settings(settings_dict)
