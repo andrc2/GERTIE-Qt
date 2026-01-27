@@ -189,6 +189,7 @@ class MainWindow(QMainWindow):
         self.network_manager.capture_completed.connect(self._on_capture_completed)
         self.network_manager.video_frame_received.connect(self._on_video_frame_received)
         self.network_manager.still_image_received.connect(self._on_still_image_received)
+        self.network_manager.raw_image_received.connect(self._on_raw_image_received)
         
         # Real video frame buffers (camera_id -> latest frame)
         self.real_frames = {}  # Raw JPEG bytes for saving
@@ -628,6 +629,75 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"  ⚠️ Still save error for camera {camera_id}: {e}")
             gui_logger.error("[CAPTURE] Error saving camera %d: %s", camera_id, e)
+    
+    def _on_raw_image_received(self, camera_id: int, jpeg_data: bytes, dng_data: bytes, timestamp: str):
+        """Handle incoming RAW capture (JPEG + DNG) from camera
+        
+        Saves both files and uses JPEG for gallery thumbnail.
+        """
+        try:
+            # Save JPEG
+            jpeg_filename = f"{self.hires_captures_dir}/rep{camera_id}_{timestamp}.jpg"
+            with open(jpeg_filename, 'wb') as f:
+                f.write(jpeg_data)
+            
+            # Save DNG (RAW)
+            dng_filename = f"{self.hires_captures_dir}/rep{camera_id}_{timestamp}.dng"
+            with open(dng_filename, 'wb') as f:
+                f.write(dng_data)
+            
+            jpeg_kb = len(jpeg_data) / 1024
+            dng_mb = len(dng_data) / 1024 / 1024
+            self.capture_count += 1
+            
+            # Get JPEG dimensions for logging
+            img_width, img_height = 0, 0
+            aspect_ratio = "unknown"
+            try:
+                img = QImage()
+                if img.loadFromData(jpeg_data):
+                    img_width = img.width()
+                    img_height = img.height()
+                    if img_height > 0:
+                        ratio = img_width / img_height
+                        if abs(ratio - 4/3) < 0.01:
+                            aspect_ratio = "4:3 ✓"
+                        elif abs(ratio - 16/9) < 0.01:
+                            aspect_ratio = "16:9 ⚠️"
+                        else:
+                            aspect_ratio = f"{ratio:.2f}"
+            except Exception as e:
+                gui_logger.warning("[CAPTURE] Failed to get dimensions for camera %d: %s", camera_id, e)
+            
+            # Log RAW capture
+            gui_logger.info("[CAPTURE] RAW Camera %d: %s + %s - %dx%d (%s) JPEG=%.0fKB DNG=%.1fMB", 
+                          camera_id, os.path.basename(jpeg_filename), os.path.basename(dng_filename),
+                          img_width, img_height, aspect_ratio, jpeg_kb, dng_mb)
+            
+            # Update progress (RAW counts as 1 capture even though it's 2 files)
+            if self.pending_hires_count > 0:
+                self.pending_hires_count -= 1
+                received = self.upload_progress.maximum() - self.pending_hires_count
+                self.upload_progress.setValue(received)
+                self.progress_label.setText(f"{received}/{self.upload_progress.maximum()}")
+            
+            # Show status
+            if self.pending_hires_count > 0:
+                print(f"  📸 RAW: {os.path.basename(jpeg_filename)} ({jpeg_kb:.0f}KB) + DNG ({dng_mb:.1f}MB) {img_width}x{img_height} {aspect_ratio} [{self.pending_hires_count} left]")
+            else:
+                print(f"  📸 RAW: {os.path.basename(jpeg_filename)} ({jpeg_kb:.0f}KB) + DNG ({dng_mb:.1f}MB) {img_width}x{img_height} {aspect_ratio} [done]")
+                if self.capture_timeout_timer:
+                    self.capture_timeout_timer.stop()
+                self.upload_progress.hide()
+                self.progress_label.hide()
+            
+            # Link preview thumbnail to JPEG file (not DNG)
+            if hasattr(self, 'gallery'):
+                self.gallery.link_preview_to_file(camera_id, jpeg_filename)
+                
+        except Exception as e:
+            print(f"  ⚠️ RAW save error for camera {camera_id}: {e}")
+            gui_logger.error("[CAPTURE] RAW error saving camera %d: %s", camera_id, e)
     
     def _toggle_gallery(self):
         """Toggle gallery visibility using splitter"""
