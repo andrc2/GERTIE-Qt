@@ -94,10 +94,11 @@ camera_settings = {
     'saturation': 50,
     'white_balance': 'auto',
     'exposure_mode': 'auto',
-    'jpeg_quality': 80,
+    'jpeg_quality': 95,     # Higher quality for stills
     'fps': 30,
     'resolution': '640x480',
     'image_format': 'JPEG',
+    'raw_enabled': False,   # RAW capture (DNG) - for rep8
     'crop_enabled': False,
     'crop_x': 0,
     'crop_y': 0,
@@ -419,19 +420,33 @@ def capture_local_still():
         capture_start_time = time.time()
         logging.info(f"[TIMING] Capture cycle START at {capture_start_time:.3f}")
         
-        # Step 3: Capture dedicated high-resolution still
-        filename = capture_local_image_high_resolution()
-        if filename:
-            # Step 4: Upload to master
-            success = send_local_image(filename)
-            if success:
-                logging.info("[LOCAL] Still capture protocol completed successfully")
-                result = True
+        # Step 3: Capture dedicated high-resolution still (with RAW support)
+        raw_enabled = camera_settings.get('raw_enabled', False)
+        
+        if raw_enabled:
+            # RAW capture path - uses libcamera-still with --raw flag
+            logging.info("[LOCAL] RAW capture enabled - using libcamera-still")
+            capture_result = capture_local_raw()
+            if capture_result:
+                jpeg_filename, dng_filename = capture_result
+                # Step 4: Upload both files to master
+                success = send_local_raw(jpeg_filename, dng_filename)
             else:
-                logging.error("[LOCAL] Failed to upload image to master")
-                result = False
+                success = False
         else:
-            logging.error("[LOCAL] Failed to capture high-resolution image")
+            # Standard JPEG capture
+            filename = capture_local_image_high_resolution()
+            if filename:
+                # Step 4: Upload to master
+                success = send_local_image(filename)
+            else:
+                success = False
+        
+        if success:
+            logging.info("[LOCAL] Still capture protocol completed successfully")
+            result = True
+        else:
+            logging.error("[LOCAL] Failed to capture or upload image")
             result = False
     except Exception as e:
         logging.error(f"[LOCAL] Error during still capture protocol: {e}")
@@ -554,6 +569,121 @@ def capture_local_image_high_resolution():
             capture_complete_event.set()
             logging.info(f"[EVENT] capture_complete_event SET (FALLBACK) at {time.time():.3f}")
         return None
+
+
+def capture_local_raw():
+    """Capture RAW (DNG) + JPEG using libcamera-still --raw flag for rep8"""
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    jpeg_filename = f"/tmp/local_capture_{timestamp}.jpg"
+    dng_filename = f"/tmp/local_capture_{timestamp}.dng"
+    
+    logging.info("[LOCAL] Starting RAW capture with libcamera-still...")
+    
+    # Build libcamera-still command with --raw flag
+    jpeg_quality = camera_settings.get('jpeg_quality', 95)
+    command = [
+        "libcamera-still",
+        "--nopreview",
+        "-o", jpeg_filename,
+        "--raw",           # This creates the DNG file
+        "--timeout", "2000",
+        "--quality", str(jpeg_quality)
+    ]
+    
+    logging.info(f"[LOCAL] RAW command: {' '.join(command)}")
+    
+    try:
+        result = subprocess.run(command, timeout=30, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logging.error(f"[LOCAL] libcamera-still RAW failed: {result.stderr}")
+            capture_complete_event.set()
+            return None
+        
+        # libcamera-still creates DNG with same name but .dng extension
+        actual_dng = jpeg_filename.rsplit('.', 1)[0] + '.dng'
+        
+        # Verify both files exist
+        jpeg_exists = os.path.exists(jpeg_filename)
+        dng_exists = os.path.exists(actual_dng)
+        
+        if jpeg_exists and dng_exists:
+            jpeg_size = os.path.getsize(jpeg_filename)
+            dng_size = os.path.getsize(actual_dng)
+            logging.info(f"[LOCAL] ✅ RAW capture success:")
+            logging.info(f"[LOCAL]    JPEG: {jpeg_filename} ({jpeg_size/1024:.0f}KB)")
+            logging.info(f"[LOCAL]    DNG:  {actual_dng} ({dng_size/1024/1024:.1f}MB)")
+            
+            # Rename DNG to expected filename if different
+            if actual_dng != dng_filename:
+                os.rename(actual_dng, dng_filename)
+            
+            # Signal completion
+            capture_complete_event.set()
+            logging.info(f"[EVENT] capture_complete_event SET at {time.time():.3f}")
+            
+            return (jpeg_filename, dng_filename)
+        else:
+            logging.error(f"[LOCAL] RAW capture incomplete: JPEG={jpeg_exists}, DNG={dng_exists}")
+            capture_complete_event.set()
+            return None
+            
+    except subprocess.TimeoutExpired:
+        logging.error("[LOCAL] RAW capture timeout (30s)")
+        capture_complete_event.set()
+        return None
+    except Exception as e:
+        logging.error(f"[LOCAL] RAW capture error: {e}")
+        capture_complete_event.set()
+        return None
+
+
+def send_local_raw(jpeg_filename, dng_filename):
+    """Send RAW capture files (JPEG + DNG) to master via TCP using RAW1 protocol"""
+    try:
+        jpeg_size = os.path.getsize(jpeg_filename)
+        dng_size = os.path.getsize(dng_filename)
+        total_size = jpeg_size + dng_size
+        
+        logging.info(f"[LOCAL] RAW transfer: JPEG={jpeg_size/1024:.0f}KB, DNG={dng_size/1024/1024:.1f}MB, Total={total_size/1024/1024:.1f}MB")
+        
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(120.0)  # Extended timeout for large DNG files
+            logging.info(f"[LOCAL] RAW transfer connecting to {MASTER_IP}:{LOCAL_STILL_PORT}")
+            sock.connect((MASTER_IP, LOCAL_STILL_PORT))
+            
+            # Send RAW1 header to indicate RAW transfer
+            sock.sendall(b"RAW1")
+            
+            # Send JPEG size (4 bytes big-endian)
+            sock.sendall(jpeg_size.to_bytes(4, 'big'))
+            
+            # Send JPEG data
+            with open(jpeg_filename, 'rb') as f:
+                sock.sendall(f.read())
+            
+            # Send DNG size (4 bytes big-endian)
+            sock.sendall(dng_size.to_bytes(4, 'big'))
+            
+            # Send DNG data
+            with open(dng_filename, 'rb') as f:
+                sock.sendall(f.read())
+            
+            logging.info(f"[LOCAL] ✅ RAW transfer complete: {total_size/1024/1024:.1f}MB total")
+            
+            # Clean up temp files
+            try:
+                os.remove(jpeg_filename)
+                os.remove(dng_filename)
+            except:
+                pass
+            
+            return True
+            
+    except Exception as e:
+        logging.error(f"[LOCAL] Error sending RAW files: {e}")
+        return False
+
 
 def send_local_image(filename):
     """Send local image to master GUI via TCP (same as working version)"""
