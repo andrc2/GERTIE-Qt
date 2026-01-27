@@ -47,6 +47,29 @@ RAW_CAPTURE_SETTINGS = {
     "rep8": {"raw_enabled": False},  # Toggle via settings dialog
 }
 
+def is_raw_capable(slave_name):
+    """Check if a slave is capable of RAW capture"""
+    if slave_name in SLAVES:
+        return SLAVES[slave_name].get("raw_capable", False)
+    return False
+
+def is_raw_enabled(slave_name):
+    """Check if RAW capture is currently enabled for a slave"""
+    if slave_name in RAW_CAPTURE_SETTINGS:
+        return RAW_CAPTURE_SETTINGS[slave_name].get("raw_enabled", False)
+    return False
+
+def set_raw_enabled(slave_name, enabled):
+    """Enable or disable RAW capture for a slave"""
+    if slave_name in RAW_CAPTURE_SETTINGS:
+        RAW_CAPTURE_SETTINGS[slave_name]["raw_enabled"] = enabled
+        return True
+    return False
+
+def get_raw_capable_slaves():
+    """Get list of slave names that are RAW capable"""
+    return [name for name, config in SLAVES.items() if config.get("raw_capable", False)]
+
 # Grid configuration
 NUM_ROWS = 2
 NUM_COLS = 4  # Updated to accommodate 8 cameras (2x4 grid)
