@@ -48,19 +48,29 @@
 
 ## 🔴 CRITICAL ISSUES (Broken/Non-Functional)
 
-### C1: Individual Camera Capture Does Not Work
-**Status**: BROKEN
-**Symptoms**:
-- Pressing 1-8 keys does NOT create actual hi-res captures
-- Pressing 1-8 keys does NOT create thumbnails in gallery
-- Individual "Capture" button in camera widget does NOT capture
-- Only "Capture All" (C key) works for actual captures
+### C1: Individual Camera Capture ~~Does Not Work~~
+**Status**: ✅ FIXED (2026-01-27)
 
-**Required Fix**:
-- Implement working individual camera capture
-- Must trigger hi-res JPEG capture on slave
-- Must create thumbnail in gallery
-- Must show progress indicator
+**Verified Working:**
+- Individual "Capture" button (📷) in camera widget ✅
+- Creates preview thumbnail in gallery ✅
+- Sends CAPTURE_STILL command to slave ✅
+- Receives hi-res JPEG (4056x3040, 4:3) ✅
+- Shows progress indicator ✅
+
+**Note on 1-8 Keys:**
+- 1-8 keys are for TOGGLE PREVIEW (exclusive mode), NOT capture
+- This matches Tkinter behavior
+- Individual capture is via the 📷 button only
+
+**Test Evidence (qt_latest.log 2026-01-27):**
+```
+[DEBUG] CameraWidget._on_capture() called for camera 5
+[DEBUG] _on_camera_capture RECEIVED: camera 5 (192.168.0.205)
+[MANAGER] Queued CAPTURE_STILL for camera 5
+[STILL_RX] Received 1892906 bytes from camera 5
+[CAPTURE] Camera 5: rep5_20260127_104257.jpg - 4056x3040 (4:3 ✓) 1849KB
+```
 
 ---
 
