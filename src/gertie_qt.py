@@ -29,6 +29,7 @@ from network_manager import NetworkManager
 from gallery_panel import GalleryPanel
 from camera_settings_dialog import CameraSettingsDialog
 from config import get_ip_from_camera_id, SLAVES
+from audio_feedback import play_capture_sound, set_audio_enabled
 
 # ============================================================================
 # LOGGING SETUP - Outputs to stdout, captured by run_qt_with_logging.sh
@@ -628,6 +629,9 @@ class MainWindow(QMainWindow):
         print(f"\n📷 [DEBUG] _on_camera_capture RECEIVED: camera {camera_id} ({ip})")
         gui_logger.info("[CAPTURE] Single capture requested for camera %d (%s)", camera_id, ip)
         
+        # Play shutter sound (non-blocking)
+        play_capture_sound()
+        
         # INSTANT: Create preview thumbnail from current video frame (like Capture All does)
         if hasattr(self, 'gallery') and camera_id in self.decoded_frames:
             preview_pixmap = self.decoded_frames[camera_id]
@@ -675,6 +679,9 @@ class MainWindow(QMainWindow):
         Uses adaptive chunk sizing in network receiver to handle queue depth.
         Smaller chunks when busy = GUI stays responsive.
         """
+        
+        # Play shutter sound (non-blocking)
+        play_capture_sound()
         
         # Queue depth protection - allow multiple captures but limit queue
         MAX_PENDING = 24  # Max 24 hi-res images in flight (3 batches)
