@@ -546,10 +546,17 @@ class VideoReceiver(QThread):
 # =============================================================================
 
 class StillReceiver(QThread):
-    """Receive high-resolution still images from cameras via TCP"""
+    """Receive high-resolution still images from cameras via TCP
+    
+    Supports two protocols:
+    1. Standard JPEG: Raw JPEG bytes sent directly
+    2. RAW protocol: "RAW1" header followed by JPEG + DNG with size prefixes
+    """
     
     # Signal: camera_id, image_data (bytes), timestamp
     still_received = Signal(int, bytes, str)
+    # Signal for RAW: camera_id, jpeg_data, dng_data, timestamp
+    raw_still_received = Signal(int, bytes, bytes, str)
     
     def __init__(self):
         super().__init__()
@@ -628,13 +635,26 @@ class StillReceiver(QThread):
         logger.info("[STILL_RX] Receiver thread stopped")
     
     def _receive_image(self, conn, ip, camera_id):
-        """Receive complete image from connection with adaptive chunk sizing"""
+        """Receive complete image from connection with adaptive chunk sizing
+        
+        Detects protocol:
+        - If first 4 bytes are "RAW1", use RAW protocol (JPEG + DNG)
+        - Otherwise, standard JPEG transfer
+        """
         try:
+            # First, peek at the header to detect protocol
+            header = conn.recv(4, socket.MSG_PEEK)
+            
+            if header == b"RAW1":
+                # RAW protocol - receive JPEG + DNG
+                self._receive_raw_images(conn, ip, camera_id)
+                return
+            
+            # Standard JPEG transfer
             chunks = []
             total_size = 0
             
             # Adaptive chunk size based on active connections
-            # More connections = smaller chunks = more responsive GUI
             active_count = getattr(self, '_active_receives', 0)
             self._active_receives = active_count + 1
             
@@ -678,6 +698,70 @@ class StillReceiver(QThread):
             except:
                 pass
     
+    def _receive_raw_images(self, conn, ip, camera_id):
+        """Receive RAW capture (JPEG + DNG) using RAW1 protocol
+        
+        Protocol:
+        1. 4 bytes: "RAW1" header (already peeked)
+        2. 4 bytes: JPEG size (big-endian)
+        3. JPEG data
+        4. 4 bytes: DNG size (big-endian)
+        5. DNG data
+        """
+        try:
+            self._active_receives = getattr(self, '_active_receives', 0) + 1
+            
+            # Consume the "RAW1" header
+            conn.recv(4)
+            
+            # Receive JPEG size and data
+            jpeg_size_bytes = self._recv_exact(conn, 4)
+            jpeg_size = int.from_bytes(jpeg_size_bytes, 'big')
+            logger.info(f"[STILL_RX] RAW: Receiving JPEG ({jpeg_size/1024:.0f}KB) from camera {camera_id}")
+            jpeg_data = self._recv_exact(conn, jpeg_size)
+            
+            # Receive DNG size and data
+            dng_size_bytes = self._recv_exact(conn, 4)
+            dng_size = int.from_bytes(dng_size_bytes, 'big')
+            logger.info(f"[STILL_RX] RAW: Receiving DNG ({dng_size/1024/1024:.1f}MB) from camera {camera_id}")
+            dng_data = self._recv_exact(conn, dng_size)
+            
+            conn.close()
+            self._active_receives = max(0, self._active_receives - 1)
+            
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            total_size = jpeg_size + dng_size
+            
+            logger.info(f"[STILL_RX] ✅ RAW complete from camera {camera_id}: JPEG={jpeg_size/1024:.0f}KB, DNG={dng_size/1024/1024:.1f}MB, Total={total_size/1024/1024:.1f}MB")
+            
+            # Emit RAW signal
+            self.raw_still_received.emit(camera_id, jpeg_data, dng_data, timestamp)
+            
+        except Exception as e:
+            self._active_receives = max(0, getattr(self, '_active_receives', 1) - 1)
+            logger.error(f"[STILL_RX] RAW receive error from {ip}: {e}")
+        finally:
+            try:
+                conn.close()
+            except:
+                pass
+    
+    def _recv_exact(self, conn, size):
+        """Receive exactly 'size' bytes from connection"""
+        chunks = []
+        remaining = size
+        chunk_size = 131072  # 128KB chunks for large files
+        
+        while remaining > 0:
+            to_read = min(chunk_size, remaining)
+            chunk = conn.recv(to_read)
+            if not chunk:
+                raise ConnectionError(f"Connection closed with {remaining} bytes remaining")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        
+        return b''.join(chunks)
+    
     def stop(self):
         """Stop the receiver thread"""
         logger.info("[STILL_RX] Stopping receiver...")
@@ -708,6 +792,7 @@ class NetworkManager(QObject):
     video_stopped = Signal(str, int)  # ip, camera_id
     video_frame_received = Signal(str, int, bytes)  # ip, camera_id, frame_data
     still_image_received = Signal(int, bytes, str)  # camera_id, image_data, timestamp
+    raw_image_received = Signal(int, bytes, bytes, str)  # camera_id, jpeg_data, dng_data, timestamp
     command_sent = Signal(str, str, bool)  # ip, command_type, success
     camera_online = Signal(int)  # camera_id
     camera_offline = Signal(int)  # camera_id
@@ -745,6 +830,8 @@ class NetworkManager(QObject):
         self.still_receiver = StillReceiver()
         self.still_receiver.still_received.connect(
             lambda cid, data, ts: self.still_image_received.emit(cid, data, ts))
+        self.still_receiver.raw_still_received.connect(
+            lambda cid, jpeg, dng, ts: self.raw_image_received.emit(cid, jpeg, dng, ts))
         
         # Start threads
         self.worker.start()
@@ -1072,6 +1159,29 @@ class NetworkManager(QObject):
         }
         self.send_settings(ip, crop_settings, camera_id)
         logger.info(f"[MANAGER] Queued crop settings for camera {camera_id}")
+    
+    def send_raw_enabled(self, ip: str, enabled: bool, camera_id: int = 0):
+        """Send RAW capture enable/disable setting to camera
+        
+        When enabled, camera will capture and send both DNG (RAW) and JPEG files.
+        Only supported on cameras marked as raw_capable in config (rep2, rep8).
+        """
+        if camera_id == 0:
+            camera_id = get_camera_id_from_ip(ip)
+        
+        value = "True" if enabled else "False"
+        command_str = f"SET_CAMERA_RAW_ENABLED_{value}"
+        ports = get_slave_ports(ip)
+        command = NetworkCommand(
+            ip=ip,
+            command=command_str,
+            port=ports['control'],
+            command_type=CommandType.SETTING,
+            priority=CommandPriority.NORMAL,
+            camera_id=camera_id
+        )
+        self.worker.add_command(command)
+        logger.info(f"[MANAGER] Queued raw_enabled={enabled} for camera {camera_id} ({ip})")
     
 
     # =========================================================================
