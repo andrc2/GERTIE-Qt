@@ -71,9 +71,21 @@ class AudioFeedback:
         if not self.enabled:
             return
         
-        # Play multiple sounds in rapid succession for burst capture
-        for i in range(count):
+        if count == 1:
+            # Single sound - play immediately
             self._play_single_sound()
+        else:
+            # Multiple sounds - stagger them in a background thread
+            import threading
+            def play_staggered():
+                import time
+                for i in range(count):
+                    self._play_single_sound()
+                    if i < count - 1:
+                        time.sleep(0.08)  # 80ms between sounds for rapid-fire effect
+            
+            thread = threading.Thread(target=play_staggered, daemon=True)
+            thread.start()
     
     def _play_single_sound(self):
         """Play a single shutter sound (internal)"""

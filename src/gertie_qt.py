@@ -365,27 +365,19 @@ class MainWindow(QMainWindow):
         self.splitter.setStretchFactor(1, 3)
         self.splitter.setChildrenCollapsible(False)  # Prevent fully collapsing
         
-        main_layout.addWidget(self.splitter)
+        main_layout.addWidget(self.splitter, 1)  # stretch factor 1 = takes all space
         
-        # Keyboard shortcuts help bar - compact single line
-        shortcuts_bar = QLabel(
+        # Status bar with keyboard shortcuts
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        
+        # Add shortcuts as permanent widget in status bar (left side)
+        shortcuts_label = QLabel(
             "⌨️ <b>Space</b> Capture | <b>1-8</b> Focus | <b>Esc</b> All | "
             "<b>S</b> Settings | <b>G</b> Gallery | <b>R</b> Restart | <b>Q</b> Quit"
         )
-        shortcuts_bar.setFixedHeight(22)
-        shortcuts_bar.setStyleSheet("""
-            QLabel {
-                background-color: #2a2a2a;
-                color: #888;
-                padding: 2px 8px;
-                font-size: 10px;
-            }
-        """)
-        main_layout.addWidget(shortcuts_bar)
-        
-        # Status bar
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
+        shortcuts_label.setStyleSheet("color: #888; font-size: 10px;")
+        self.status_bar.addPermanentWidget(shortcuts_label)
         self.status_bar.showMessage("Ready")
     
     def _setup_menu_bar(self):
