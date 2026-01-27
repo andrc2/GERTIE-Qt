@@ -289,12 +289,12 @@ def capture_with_raw(jpeg_filename, dng_filename):
     # Build libcamera-still command with --raw flag
     # Note: libcamera-still creates DNG file with same basename as JPEG
     # NOTE: Do NOT add --quality here - build_libcamera_settings() already adds it
+    # NOTE: --rawfull removed - was causing captures to stall. --raw alone gives full resolution
     command = [
         "libcamera-still",
         "--nopreview",
         "-o", jpeg_filename,
-        "--raw",           # This creates the DNG file
-        "--rawfull",       # Force full sensor resolution RAW (4056x3040 for Pi HQ)
+        "--raw",           # This creates the DNG file (full sensor resolution by default)
         "--timeout", "2000"
         # --quality is added by build_libcamera_settings() below
     ]
