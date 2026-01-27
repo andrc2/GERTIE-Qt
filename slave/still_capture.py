@@ -294,6 +294,7 @@ def capture_with_raw(jpeg_filename, dng_filename):
         "--nopreview",
         "-o", jpeg_filename,
         "--raw",           # This creates the DNG file
+        "--rawfull",       # Force full sensor resolution RAW (4056x3040 for Pi HQ)
         "--timeout", "2000"
         # --quality is added by build_libcamera_settings() below
     ]
