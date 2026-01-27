@@ -141,6 +141,7 @@ class CameraWidget(QWidget):
         layout.addLayout(controls)
     
     def _on_capture(self):
+        print(f"[DEBUG] CameraWidget._on_capture() called for camera {self.camera_id}, ip={self.ip}")
         self.capture_requested.emit(self.camera_id, self.ip)
     
     def _on_settings(self):
@@ -415,7 +416,8 @@ class MainWindow(QMainWindow):
     
     def _on_camera_capture(self, camera_id: int, ip: str):
         """Handle single camera capture - creates preview thumbnail and sends capture command"""
-        print(f"\n📷 Capturing camera {camera_id} ({ip})...")
+        print(f"\n📷 [DEBUG] _on_camera_capture RECEIVED: camera {camera_id} ({ip})")
+        gui_logger.info("[CAPTURE] Single capture requested for camera %d (%s)", camera_id, ip)
         
         # INSTANT: Create preview thumbnail from current video frame (like Capture All does)
         if hasattr(self, 'gallery') and camera_id in self.decoded_frames:
