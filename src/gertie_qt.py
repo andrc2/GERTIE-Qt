@@ -367,17 +367,26 @@ class MainWindow(QMainWindow):
         
         main_layout.addWidget(self.splitter, 1)  # stretch factor 1 = takes all space
         
-        # Status bar with keyboard shortcuts
+        # Keyboard shortcuts bar - separate from status bar for visibility
+        shortcuts_bar = QLabel(
+            "  ⌨  Space=Capture  |  1-8=Focus  |  Esc=All  |  S=Settings  |  G=Gallery  |  R=Restart  |  Q=Quit"
+        )
+        shortcuts_bar.setFixedHeight(24)
+        shortcuts_bar.setStyleSheet("""
+            QLabel {
+                background-color: #333;
+                color: #ccc;
+                font-size: 12px;
+                padding: 4px;
+                border-top: 1px solid #555;
+            }
+        """)
+        main_layout.addWidget(shortcuts_bar)
+        
+        # Status bar (for messages only)
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        
-        # Add shortcuts as widget on LEFT side of status bar
-        shortcuts_label = QLabel(
-            "⌨️ Space=Capture | 1-8=Focus | Esc=All | S=Settings | G=Gallery | R=Restart | Q=Quit"
-        )
-        shortcuts_label.setStyleSheet("color: #aaa; font-size: 11px; padding: 2px 5px;")
-        self.status_bar.addWidget(shortcuts_label, 1)  # stretch=1 to take available space
-        self.status_bar.showMessage("")  # Clear default message
+        self.status_bar.showMessage("Ready")
     
     def _setup_menu_bar(self):
         """Setup menu bar with System Controls"""
