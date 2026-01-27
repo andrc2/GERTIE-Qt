@@ -366,6 +366,26 @@ class MainWindow(QMainWindow):
         
         main_layout.addWidget(self.splitter)
         
+        # Keyboard shortcuts help bar
+        shortcuts_bar = QLabel(
+            "  ⌨️ <b>Space</b> Capture All  |  "
+            "<b>1-8</b> Focus Camera  |  "
+            "<b>Esc</b> Show All  |  "
+            "<b>S</b> Settings  |  "
+            "<b>G</b> Gallery  |  "
+            "<b>R</b> Restart  |  "
+            "<b>Q</b> Quit"
+        )
+        shortcuts_bar.setStyleSheet("""
+            QLabel {
+                background-color: #2a2a2a;
+                color: #aaa;
+                padding: 4px 8px;
+                font-size: 11px;
+            }
+        """)
+        main_layout.addWidget(shortcuts_bar)
+        
         # Status bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
