@@ -288,16 +288,17 @@ def capture_with_raw(jpeg_filename, dng_filename):
     
     # Build libcamera-still command with --raw flag
     # Note: libcamera-still creates DNG file with same basename as JPEG
+    # NOTE: Do NOT add --quality here - build_libcamera_settings() already adds it
     command = [
         "libcamera-still",
         "--nopreview",
         "-o", jpeg_filename,
         "--raw",           # This creates the DNG file
-        "--timeout", "2000",
-        "--quality", str(camera_settings.get('jpeg_quality', 95))
+        "--timeout", "2000"
+        # --quality is added by build_libcamera_settings() below
     ]
     
-    # Add camera settings
+    # Add camera settings (includes --quality, brightness, contrast, etc.)
     libcamera_settings = build_libcamera_settings()
     command.extend(libcamera_settings)
     
