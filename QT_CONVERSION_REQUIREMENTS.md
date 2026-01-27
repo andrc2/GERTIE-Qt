@@ -1,6 +1,6 @@
 # GERTIE Qt Conversion - Complete Requirements & Issues
 
-**Last Updated**: 2026-01-19
+**Last Updated**: 2026-01-27
 **Purpose**: Mandatory reference for ALL GERTIE sessions
 **Rule**: Read this document at the start of EVERY session to ensure no omissions
 
@@ -79,23 +79,25 @@
 
 ---
 
-### C3: Keyboard Shortcuts Differ from Tkinter (Wrong Behavior)
-**Status**: INCORRECT IMPLEMENTATION
+### C3: Keyboard Shortcuts ~~Differ from Tkinter (Wrong Behavior)~~
+**Status**: ✅ FIXED (2026-01-27)
 
-| Key | Current Qt Behavior | Required Behavior (Match Tkinter) |
-|-----|---------------------|-----------------------------------|
-| **Space** | Pause/Resume video | **Capture All** |
-| **1-8** | Capture individual (broken) | **Toggle camera preview** (show single camera enlarged/exclusive mode) |
-| **R** | Reset stats | **Restart all streams** |
-| **C** | Capture All | Keep as-is (additional shortcut) |
-| **Escape** | Not implemented | **Show all cameras** (exit exclusive/single-camera view) |
-| **S** | Not implemented | **Open settings panel** |
+| Key | Qt Behavior | Matches Tkinter? |
+|-----|-------------|------------------|
+| **Space** | Capture All | ✅ |
+| **C** | Capture All | ✅ |
+| **1-8** | Toggle camera preview (exclusive mode) | ✅ |
+| **R** | Restart all streams | ✅ |
+| **Escape** | Show all cameras (exit exclusive) | ✅ |
+| **S** | Open settings panel | ✅ |
+| **G** | Toggle gallery | ✅ |
+| **Q** | Quit | ✅ |
 
-**Note on 1-8 Toggle Behavior (Exclusive Mode)**:
-- Pressing 1-8 should enlarge that camera to fill the grid (hide others)
-- Pressing same key again OR Escape returns to normal 8-camera grid
-- This is called "exclusive mode" in Tkinter
-- Individual camera CAPTURE should be a separate feature (button or different shortcut)
+**Exclusive Mode (1-8 keys)**:
+- Pressing 1-8 enlarges that camera to fill the grid (hides others) ✅
+- Pressing same key again OR Escape returns to normal 8-camera grid ✅
+- Debouncing prevents rapid switching (300ms cooldown) ✅
+- Resolution switching to HD mode for focus checking ✅
 
 ---
 
