@@ -414,8 +414,35 @@ class MainWindow(QMainWindow):
             )
     
     def _on_camera_capture(self, camera_id: int, ip: str):
-        """Handle single camera capture"""
+        """Handle single camera capture - creates preview thumbnail and sends capture command"""
+        print(f"\n📷 Capturing camera {camera_id} ({ip})...")
+        
+        # INSTANT: Create preview thumbnail from current video frame (like Capture All does)
+        if hasattr(self, 'gallery') and camera_id in self.decoded_frames:
+            preview_pixmap = self.decoded_frames[camera_id]
+            if preview_pixmap and not preview_pixmap.isNull():
+                # Scale to thumbnail size (175x113)
+                thumb = preview_pixmap.scaled(175, 113,
+                                              Qt.AspectRatioMode.KeepAspectRatio,
+                                              Qt.TransformationMode.FastTransformation)
+                # Add to gallery as preview
+                self.gallery.add_preview_thumbnail(camera_id, thumb)
+        
+        # Track pending hi-res capture
+        self.pending_hires_count += 1
+        
+        # Show progress bar for single capture too
+        self.upload_progress.setRange(0, self.pending_hires_count)
+        received = self.upload_progress.maximum() - self.pending_hires_count + 1
+        self.upload_progress.setValue(received - 1)
+        self.upload_progress.show()
+        self.progress_label.setText(f"{received - 1}/{self.pending_hires_count}")
+        self.progress_label.show()
+        
+        # Send actual capture command (hi-res image will arrive later via TCP)
         self.network_manager.send_capture_command(ip, camera_id)
+        
+        self.status_bar.showMessage(f"Capturing camera {camera_id}...", 2000)
     
     def _on_camera_settings(self, camera_id: int, ip: str):
         """Handle camera settings dialog"""
